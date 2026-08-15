@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+# generated screenshot evidence (hundreds of MB, regenerable via tools/screenshot.mjs)
+gauntlet/shots/
+out/
+_critic_shot.mjs

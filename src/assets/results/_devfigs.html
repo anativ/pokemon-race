@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>podium figure sheet (dev)</title>
+<style>
+  body { margin:0; background:#123a68; font:12px/1.2 system-ui; color:#fff; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; padding:10px; }
+  .cell { text-align:center; }
+  .cell b { display:block; font-size:13px; letter-spacing:.08em; }
+</style>
+<div class="row" id="row"></div>
+<script type="module">
+  import { roster } from '../../data/roster.js';
+  import { podiumFigureSvg } from './podium-figures.js';
+  const q = new URLSearchParams(location.search);
+  const only = (q.get('ids') || '').split(',').filter(Boolean);
+  const h = Number(q.get('h') || 210);
+  const list = only.length ? only.map((id) => roster.find((r) => r.id === id)).filter(Boolean) : roster;
+  document.getElementById('row').innerHTML = list.map((r) =>
+    `<div class="cell">${podiumFigureSvg(r, { height: h })}<b>${r.name}</b></div>`).join('');
+  window.__pkr = { isReady: true, ready: Promise.resolve(), state: () => ({ screen: 'devfigs' }) };
+  document.documentElement.dataset.pkrReady = '1';
+</script>

@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+import fs from 'fs';
+const [,, src, out, x, y, w, h, scale] = process.argv;
+const b = await chromium.launch();
+const p = await b.newPage();
+const buf = fs.readFileSync(src).toString('base64');
+await p.setContent(`<body style="margin:0"><img id=i src="data:image/png;base64,${buf}"></body>`);
+await p.evaluate(() => new Promise(r => { const i = document.getElementById('i'); if (i.complete) r(); else i.onload = r; }));
+const s = Number(scale||2);
+await p.setViewportSize({ width: Math.round(w*s), height: Math.round(h*s) });
+await p.evaluate(([x,y,s]) => { const i=document.getElementById('i'); i.style.transformOrigin='0 0'; i.style.transform=`scale(${s}) translate(${-x}px,${-y}px)`; i.style.imageRendering='pixelated'; }, [Number(x),Number(y),s]);
+await p.screenshot({ path: out });
+await b.close();

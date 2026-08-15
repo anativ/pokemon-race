@@ -1,0 +1,17 @@
+{
+  "name": "pokemon-racing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "shot": "node tools/screenshot.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
+}
