@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+import { serveRepo } from '../tools/screenshot.mjs';
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1600, height: 900 } });
+p.on('pageerror', (e) => console.log('PAGEERR', String(e)));
+await p.goto(`${origin}/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam&rolling=1`, { waitUntil: 'load' });
+await p.waitForFunction(() => window.__pkr && window.__pkr.isReady, null, { timeout: 20000 });
+await p.evaluate((m) => window.__pkr.step(m), 2600);
+const dump = () => p.evaluate(() => window.__pkrRace.racers.map((r) => ({ id: r.id, me: r.isPlayer, sp: Math.round(r.speed), spun: +r.spun.toFixed(2), lane: +r.lane.toFixed(2), item: r.item })));
+console.log('BEFORE', JSON.stringify(await dump()));
+await p.evaluate(() => { window.__pkr.press(' ', 60); });
+await p.evaluate(() => window.__pkr.step(180));
+console.log('AFTER ', JSON.stringify(await dump()));
+console.log('beams', JSON.stringify(await p.evaluate(() => window.__pkrRace.beams.map(x => ({ o: x.owner, life: +x.life.toFixed(2), hits: x.hits })))));
+await b.close(); await close();

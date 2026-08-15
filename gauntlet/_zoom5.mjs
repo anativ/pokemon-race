@@ -1,0 +1,12 @@
+import { serveRepo } from '/Users/alonnativ/code/playground/private/Gauntlet-Loop/pokemon-racing/tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, close } = await serveRepo('/Users/alonnativ/code/playground/private/Gauntlet-Loop/pokemon-racing/');
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 3 });
+await page.goto(`${origin}/index.html?screen=race&track=pallet-town`, { waitUntil: 'load' });
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true, null, { timeout: 15000 });
+await page.evaluate(() => window.__pkr.seed(7));
+await page.evaluate(() => window.__pkr.step(9000));
+await page.screenshot({ path: '/Users/alonnativ/code/playground/private/Gauntlet-Loop/pokemon-racing/gauntlet/shots/rw-r5-kartzoom.png', clip: { x: 620, y: 440, width: 460, height: 400 } });
+await browser.close(); await close();
+console.log('ok');

@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+import { serveRepo } from '/Users/alonnativ/code/playground/private/Gauntlet-Loop/pokemon-racing/tools/screenshot.mjs';
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1600, height: 900 } });
+p.on('console', (m) => console.log(m.type().toUpperCase(), m.text()));
+p.on('pageerror', (e) => console.log('PAGEERR', String(e)));
+await p.goto(`${origin}/index.html?screen=race&rolling=1`, { waitUntil: 'load' });
+await p.waitForFunction(() => window.__pkr && window.__pkr.isReady, null, { timeout: 20000 });
+console.log(JSON.stringify(await p.evaluate(() => window.__pkr.registered())));
+console.log('fxcanvas', await p.evaluate(() => !!document.querySelector('.pkr-fx')));
+console.log('overlayhtml', await p.evaluate(() => document.getElementById('pkr-layer-overlay').innerHTML.slice(0,200)));
+await b.close(); await close();

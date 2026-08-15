@@ -427,7 +427,9 @@ export function balloon(c, x, y, s, sc, seed) {
 function neonText(c, x, y, w, h, col, seed) {
   // abstract "signage": glowing bars standing in for letters
   c.save();
-  if (h > 26) { c.shadowColor = col; c.shadowBlur = Math.min(20, h * 0.5); }
+  // shadowBlur is the single most expensive canvas op in the neon theme;
+  // reserve it for the near-field signs where the bloom actually reads.
+  if (h > 70) { c.shadowColor = col; c.shadowBlur = Math.min(20, h * 0.5); }
   c.fillStyle = col;
   const n = 3 + Math.floor(seed * 3);
   for (let i = 0; i < n; i++) {
@@ -461,7 +463,7 @@ export function billboard(c, x, y, s, sc, seed) {
   c.strokeStyle = rgba(col, 0.95);
   c.lineWidth = Math.max(1, s * 0.028);
   c.save();
-  if (s > 40) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.3); }
+  if (s > 95) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.3); }
   roundRect(c, x - w / 2, top, w, hgt, s * 0.05);
   c.stroke();
   c.restore();
@@ -497,7 +499,7 @@ export function tower(c, x, y, s, sc, seed) {
   }
   const col = [P.neonA, P.neonB, P.neonD][Math.floor(seed * 3) % 3];
   c.save();
-  if (s > 40) { c.shadowColor = col; c.shadowBlur = Math.min(20, s * 0.26); }
+  if (s > 95) { c.shadowColor = col; c.shadowBlur = Math.min(20, s * 0.26); }
   c.fillStyle = col;
   c.fillRect(x - w / 2, y - hgt - s * 0.03, w, Math.max(1.5, s * 0.035));
   c.restore();
@@ -510,7 +512,7 @@ export function streetlight(c, x, y, s, sc, seed) {
   c.fillRect(x - s * 0.035, y - hgt, s * 0.07, hgt);
   c.fillRect(x - s * 0.035, y - hgt, s * 0.3, s * 0.05);
   c.save();
-  if (s > 34) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.4); }
+  if (s > 90) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.4); }
   c.fillStyle = col;
   c.beginPath();
   c.ellipse(x + s * 0.26, y - hgt + s * 0.06, s * 0.075, s * 0.05, 0, 0, Math.PI * 2);
@@ -535,7 +537,7 @@ export function neonsign(c, x, y, s, sc, seed) {
   c.fillStyle = '#1a2148';
   c.fillRect(x - s * 0.03, y - hgt, s * 0.06, hgt);
   c.save();
-  if (s > 34) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.4); }
+  if (s > 90) { c.shadowColor = col; c.shadowBlur = Math.min(22, s * 0.4); }
   c.strokeStyle = col;
   c.lineWidth = Math.max(1.2, s * 0.05);
   c.beginPath();
@@ -576,7 +578,7 @@ export function palmneon(c, x, y, s, sc, seed) {
   c.quadraticCurveTo(x + s * 0.08, y - s * 0.6, x + s * 0.02, y - s * 1.0);
   c.stroke();
   c.save();
-  if (s > 34) { c.shadowColor = col; c.shadowBlur = Math.min(18, s * 0.34); }
+  if (s > 90) { c.shadowColor = col; c.shadowBlur = Math.min(18, s * 0.34); }
   c.strokeStyle = col;
   c.lineWidth = Math.max(1, s * 0.04);
   for (let i = 0; i < 5; i++) {

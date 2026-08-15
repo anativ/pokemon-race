@@ -21,9 +21,9 @@ export const RAIL_OFF = 1.42;   // guard rail offset (x half widths)
  * 39-unit brow and a `hill: 0.8` one an 62-unit brow that the road visibly
  * folds over, hiding the tarmac beyond it.
  */
-export const HILL_K = 78;
+export const HILL_K = 64;
 /** amplitude of the two loop-closed terrain waves layered under the hills */
-export const ROLL_A = [10, 5.5];
+export const ROLL_A = [8, 4.5];
 /** curvature -> banking (fraction of half width, before BANK_K). */
 export const BANK_K_GEO = 0.20;
 

@@ -34,7 +34,7 @@ export function collectScenery(view3, scene) {
     if (p.y >= maxY) continue;
     maxY = p.y;
     const gi = view3.base + n;
-    if (p.fog > 0.97) continue;
+    if (p.fog > 0.90) continue;
     for (const side of [-1, 1]) {
       const salt = side < 0 ? 401 : 907;
       const gate = noise1(gi, salt);
@@ -43,7 +43,7 @@ export function collectScenery(view3, scene) {
       const spread = noise1(gi, salt + 11);
       const f = (def.min + (def.max - def.min) * spread) * side;
       const s = def.scale * (0.78 + noise1(gi, salt + 17) * 0.5) * PROP_UNIT * p.scale * hh;
-      if (s < 2.2) continue;
+      if (s < 5.0) continue;   // smaller than this a prop is a grey speck the fog eats anyway
       const yTilt = edgeY(p, clamp(f, -1.5, 1.5));
       out.push({
         fn: PROPS[def.type] || PROPS.tree,

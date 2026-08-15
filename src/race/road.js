@@ -65,8 +65,17 @@ export function renderRoad(c, view3, scene, v) {
   const K2 = scene.kerbAlt || K;
   const fog = scene.fog;
 
-  // ground plane under everything
-  c.fillStyle = G.far;
+  // Ground plane under everything. Not a flat fill: the verge quads only reach
+  // as far as the projected slices do, so a solid rectangle left a hard band of
+  // untouched colour between the last slice and the vanishing point - the
+  // "green tabletop with a road painted on it" look. Grading it into the fog
+  // colour over the first fifth turns that band into distance.
+  const gg = c.createLinearGradient(0, horizon - 2, 0, horizon + (h - horizon) * 0.34);
+  gg.addColorStop(0, fog.color);
+  gg.addColorStop(0.18, mix(fog.color, G.far, 0.55));
+  gg.addColorStop(0.52, mix(fog.color, G.far, 0.88));
+  gg.addColorStop(1, G.far);
+  c.fillStyle = gg;
   c.fillRect(0, horizon - 2, w, h - horizon + 2);
 
   const kerbW = K.width;
@@ -90,12 +99,34 @@ export function renderRoad(c, view3, scene, v) {
     const bandTop = Math.floor(p2.y);
     const bandH = Math.max(1, prevTop - bandTop);
     prevTop = bandTop;
+    // Far slices are a pixel tall and half a fog away: the crown shading,
+    // grain, racing line and painted markings are invisible there but cost the
+    // same as the near ones. Detail is a strict function of the projected
+    // width, so a slice never flickers between the two paths.
+    const detail = p2.w > 15;
 
     // --- verge (tilted quads, so nothing shows through on a banked slice) --
     const far = Math.min(320, w / Math.max(0.5, p2.w) + 2.5);
     const gcol = mow ? G.near : G.alt;
     strip(c, p1, p2, -far, -1.04, gcol);
     strip(c, p1, p2, 1.04, far, gcol);
+    if (!detail) {
+      strip(c, p1, p2, -1.06, 1.06, R.apron);
+      strip(c, p1, p2, -1, 1, light ? R.base : R.alt);
+      strip(c, p1, p2, -1 - kerbW, -1, kband ? K.a : K.b);
+      strip(c, p1, p2, 1, 1 + kerbW, kband ? K2.b : K2.a);
+      if (p2.fog > 0.004) {
+        c.save();
+        const cap0 = fog.max + (1 - fog.max) * p2.tail;
+        c.globalAlpha = Math.min(cap0, Math.pow(p2.fog, fog.power * 0.55));
+        c.fillStyle = fog.color;
+        c.fillRect(0, bandTop, w, bandH);
+        c.restore();
+      }
+      maxY = p2.y;
+      p1 = p2;
+      continue;
+    }
     if (!mow && G.stripeAlpha) {
       strip(c, p1, p2, -far, -1.04, G.stripe, G.stripeAlpha * 0.55);
       strip(c, p1, p2, 1.04, far, G.stripe, G.stripeAlpha * 0.55);

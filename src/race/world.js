@@ -177,6 +177,25 @@ export function renderRaceWorld(c, ctx) {
   drawArches(c, view3, scene, track, road);
   drawItemBoxes(c, view3, scene, track, road, time);
 
+  // ---- hero placement --------------------------------------------------
+  // Worked out *before* the rivals so they can be shouldered clear of it: the
+  // hero is the one kart that must never be intersected by another body.
+  const player = race ? (race.racers.find((r) => r.isPlayer) || race.racers[0]) : null;
+  let hero = null;
+  if (player) {
+    const raw = placeAt(view3, CAM_BACK, player.lane, 0)
+      || { x: w / 2, y: h * 0.86, w: w * 0.42, fog: 0 };
+    // The hero rides the road surface, so a crest or a dip under the camera
+    // would swing it off the bottom of the frame. Let it bob, but keep the
+    // whole kart on screen the way a real chase rig would.
+    const at = { ...raw, y: clamp(raw.y, h * 0.80, h * 0.93) };
+    // constant screen scale: the chase camera keeps a fixed distance, so the
+    // hero kart must not breathe with the road width. Deliberately modest so
+    // the road ahead - the thing the player actually reads - stays open.
+    const s = clamp(w * 0.092 + at.w * 0.014, 106, 176);
+    hero = { at, s, def: racerDef(player.id), player };
+  }
+
   // ---- rivals ----------------------------------------------------------
   if (race) {
     const loop = road.loopLen;
@@ -196,10 +215,24 @@ export function renderRaceWorld(c, ctx) {
     }
     list.sort((a, b) => b.dz - a.dz);
     for (const it of list) {
-      const s = Math.min(168, it.at.w * 0.20);
+      const s = Math.min(132, it.at.w * 0.155);
       if (s < 4) continue;
       const a = (1 - Math.min(0.9, it.at.fog)) * clamp((it.dz - 66) / 26, 0, 1);
       if (a < 0.03) continue;
+      // Keep every rival body out of the hero's silhouette. A kart that only
+      // grazes it gets shouldered sideways; one that would be mostly swallowed
+      // is dropped, because the hero paints over it anyway and the leftover
+      // sliver reads as two karts fused together.
+      if (hero) {
+        const dxh = it.at.x - hero.at.x;
+        const need = (s + hero.s) * 1.16;
+        const over = need - Math.abs(dxh);
+        if (over > 0 && Math.abs(it.at.y - hero.at.y) < hero.s * 1.7) {
+          if (over > s * 1.7) continue;
+          const dir = dxh === 0 ? (it.r.lane >= 0 ? 1 : -1) : Math.sign(dxh);
+          it.at = { ...it.at, x: it.at.x + dir * over };
+        }
+      }
       c.save();
       c.globalAlpha = a;
       const def = racerDef(it.r.id);
@@ -213,45 +246,49 @@ export function renderRaceWorld(c, ctx) {
         drawDrift(c, it.at.x, it.at.y, s, it.r.drift * 0.7, it.r.boost, time, def.accent);
       }
       drawKart(c, it.at.x, it.at.y, s, def, {
-        lean: clamp(it.r.lane * 0.4, -0.6, 0.6),
-        yaw: 0.16 + (it.at.x - w / 2) / w * 0.5,
+        steer: clamp(it.r.lane * 0.5, -0.7, 0.7),
+        drift: it.r.drift || 0,
+        yaw: 0.10 + ((it.at.x - w / 2) / w) * 0.55,
+        spin: time * 0.014 + it.dz,
         time: time + it.dz * 40,
         bounce: Math.sin(time * 0.008 + it.dz) * s * 0.012,
         light,
+        ambient: Math.min(0.45, it.at.fog * 0.5),
       });
       c.restore();
     }
   }
 
   // ---- player ----------------------------------------------------------
-  const player = race ? (race.racers.find((r) => r.isPlayer) || race.racers[0]) : null;
-  if (player) {
-    const at = placeAt(view3, CAM_BACK, player.lane, 0)
-      || { x: w / 2, y: h * 0.86, w: w * 0.42, fog: 0 };
-    // constant screen scale: the chase camera keeps a fixed distance, so the
-    // hero kart must not breathe with the road width.
-    const s = clamp(w * 0.128 + at.w * 0.02, 150, 245);
-    const def = racerDef(player.id);
-    const lean = clamp((player.lane - cam.lane) * 3.2 - cam.curve * 0.05, -0.7, 0.7);
+  if (hero) {
+    const { at, s, def } = hero;
+    // Steering read-out: the smoothed lane error the chase camera already
+    // tracks. It swings the nose, banks the body and turns the front wheels,
+    // so a left-hand corner never renders the same frame as a straight.
+    const steer = clamp((cam.yaw * 1.9 + (player.lane - cam.lane) * 1.4) * 3.1, -1, 1);
     const bounce = Math.sin(time * 0.011) * s * 0.010 + cam.shake * 3;
+    const opts = {
+      steer,
+      drift: player.drift || 0,
+      yaw: 0.17,
+      pitch: clamp(-cam.speedT * 0.02 + player.boost * 0.05, -0.06, 0.06),
+      spin: time * (0.010 + cam.speedT * 0.05),
+      time,
+      bounce,
+      light,
+    };
     // hero grounding: a wide contact patch under the tyres plus the long cast
     // shadow thrown by the theme's key light, so the kart sits ON the road
     if (scene.wetFloor) {
       reflection(c, at.x, at.y + s * 0.24, scene.wetFloor, 0.62, (cc) => {
-        drawKart(cc, at.x, at.y, s, def, { lean, yaw: 0.26, time, bounce, light });
+        drawKart(cc, at.x, at.y, s, def, opts);
       });
     }
-    groundShadow(c, at.x, at.y + s * 0.20, s * 1.06, { light, alpha: 1.5, squash: 0.24 });
+    groundShadow(c, at.x, at.y + s * 0.16, s * 1.12, { light, alpha: 1.5, squash: 0.22 });
     drawExhaust(c, at.x, at.y + bounce, s, cam.speedT * 0.8 + player.boost * 0.5, time,
       scene.key === 'neon' ? '#c8d8ff' : '#e6ecf4');
     drawDrift(c, at.x, at.y + bounce, s, player.drift, player.boost, time, def.accent);
-    drawKart(c, at.x, at.y, s, def, {
-      lean,
-      yaw: 0.26,
-      time,
-      bounce,
-      light,
-    });
+    drawKart(c, at.x, at.y, s, def, opts);
   }
 
   c.restore();

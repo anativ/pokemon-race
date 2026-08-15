@@ -17,11 +17,12 @@ import { SEG_LEN, ROAD_W, segIndexAt, heightAt } from './geometry.js';
 export const CAM_DEPTH = 1.42;    // 1/tan(fov/2) -> ~70 degree vertical fov
 export const CAM_HEIGHT = 88;     // world units above the road surface
 export const CAM_BACK = 106;       // world units behind the kart
-export const DRAW = 420;          // road slices projected per frame
+export const DRAW = 340;          // road slices projected per frame
 export const HORIZON_F = 0.352;   // vanishing point as a fraction of view height
-export const CURVE_K = 0.040;    // curvature -> lateral drift per slice
+export const CURVE_K = 0.036;    // curvature -> lateral drift per slice
 export const BANK_K = 0.42;       // banking tilt (fraction of half width)
-export const X_SAT = 620;        // soft limit on accumulated lateral drift
+export const X_SAT = 340;        // soft limit on accumulated lateral drift
+export const Z_LEAD = 380;       // depth over which the drift fades in
 export const BEND_N = 90;         // slice sampled for the backdrop pan
 export const HILL_N = 70;         // slice sampled for the horizon lift
 
@@ -38,7 +39,12 @@ export function projectRoad(road, cam, view) {
   const hh = h / 2;
   const camZ = cam.dist;
   const camX = cam.lane * ROAD_W * 0.84;
-  const camY = heightAt(road, camZ) + (cam.height || CAM_HEIGHT);
+  // The rig hovers a fixed height above the KART, not above the empty tarmac
+  // CAM_BACK behind it. Anchoring it to the camera's own slice made the hero
+  // swing hundreds of pixels up and down the frame on every grade, because at
+  // that depth a few units of elevation difference project enormously. Anchored
+  // to the kart, the hero sits still and the road ahead is what rolls.
+  const camY = heightAt(road, camZ + CAM_BACK) + (cam.height || CAM_HEIGHT);
   const horizon = Math.round(h * HORIZON_F - (cam.pitch || 0) * h * 0.5);
 
   const base = Math.floor(camZ / SEG_LEN);
@@ -59,12 +65,22 @@ export function projectRoad(road, cam, view) {
     x += dx;
     if (z <= 2) { pts.push(null); continue; }
     const scale = CAM_DEPTH / z;
-    // Curvature accumulates quadratically, so a 200-unit hairpin would throw
-    // the far slices thousands of units sideways and the whole ribbon would
-    // leave the frame. Saturate it: linear for the near and mid field (where
-    // the bend has to read honestly) and asymptotic beyond, which is how a
-    // real corner looks anyway once it turns past the camera's shoulder.
-    const xs = X_SAT * Math.tanh(x / X_SAT);
+    // Two corrections to the raw accumulated drift.
+    //
+    // 1. Lead-in. Raw x grows as ~c*z^2, which projects to a screen offset
+    //    growing linearly with z - so on a hairpin the tarmac slides out from
+    //    under the camera and the kart ends up driving on the grass. A real
+    //    chase rig yaws to follow the track, keeping the road the kart is on
+    //    centred and pushing the bend into the middle distance. Fading the
+    //    drift in over the first Z_LEAD units reproduces exactly that.
+    // 2. Saturation. Curvature still accumulates quadratically further out, so
+    //    a tight corner would fling the far slices right out of frame. tanh
+    //    keeps the mid field honest and lets the far field turn away
+    //    asymptotically, which is what a corner does past the camera's
+    //    shoulder anyway.
+    const s = z < Z_LEAD ? z / Z_LEAD : 1;
+    const lead = s * s * (3 - 2 * s);
+    const xs = X_SAT * Math.tanh(x * lead / X_SAT);
     const sx = hw + scale * (xs - camX) * hw;
     const sy = horizon + scale * (camY - seg.y) * hh;
     const sw = Math.max(0.4, scale * ROAD_W * hw);

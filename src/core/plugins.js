@@ -16,6 +16,8 @@ export const PLUGIN_MODULES = [
   'screens/trackSelect.js',
   'screens/results.js',
   'race/world.js',
+  'race/racers.js',
+  'hud/index.js',
 ];
 
 export default PLUGIN_MODULES;
