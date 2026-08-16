@@ -27,7 +27,7 @@ export function makeBrain(rng, def, phys) {
     /** how quickly they use a held item (seconds of holding) */
     trigger: 1.5 + rng.next() * 3.4,
     /** lane they prefer to sit in on a straight */
-    home: (rng.next() - 0.5) * 1.1,
+    home: (rng.next() - 0.5) * 1.7,
     /** stable phase so two karts never weave in lockstep */
     phase: rng.next() * 6.283,
     reaction: 0.18 + rng.next() * 0.22,
@@ -52,7 +52,7 @@ function lookahead(race, r) {
 export function targetLane(race, r, look) {
   const brain = r.brain;
   // Apex the inside of the bend, drift out on exit.
-  let want = clamp(-look.blend * 0.26, -0.72, 0.72) + brain.home * 0.35;
+  let want = clamp(-look.blend * 0.24, -0.62, 0.62) + brain.home * 0.55;
 
   // Poke Ball hunting: aim at the nearest free ball when the slot is empty.
   if (!r.item) {

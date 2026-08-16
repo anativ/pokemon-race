@@ -163,7 +163,9 @@ const characterSelect = {
     else if (action.includes('down')) c = (c + COLS) % n;
     else if (action.includes('up')) c = (c + n - COLS) % n;
     else if (action.includes('confirm')) { this.confirm(ctx); return; }
-    else if (action.includes('back')) { ctx.goto('title'); return; }
+    // Dropping back to the title clears both confirmations - the next run
+    // through the menus starts from a clean slate, not a half-locked one.
+    else if (action.includes('back')) { s.confirmedRacer = false; s.confirmedTrack = false; ctx.goto('title'); return; }
     if (c !== s.racerCursor) { s.racerCursor = c; this.paint(ctx); }
   },
 

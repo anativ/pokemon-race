@@ -10,7 +10,7 @@
  */
 
 const COLS = 5;
-const GO_HOLD = 1.25;   // seconds the GO! panel stays up after the lights go green
+const GO_HOLD = 1.7;    // seconds the GO! panel stays up after the lights go green
 
 export default {
   id: 'pkr-race-countdown',

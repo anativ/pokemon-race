@@ -11,7 +11,8 @@ const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errs = [];
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 page.on('pageerror', (e) => errs.push(String(e)));
-await page.goto(`${origin}/index.html?screen=race&track=pallet-town&racer=pikachu&item=${item}&rolling=1`,
+const track = process.argv[5] || 'pallet-town';
+await page.goto(`${origin}/index.html?screen=race&track=${track}&racer=pikachu&item=${item}&rolling=1`,
   { waitUntil: 'load' });
 await page.waitForFunction(() => window.__pkr && window.__pkr.isReady, null, { timeout: 20000 });
 await page.evaluate((m) => window.__pkr.step(m), pre);

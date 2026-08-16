@@ -1,0 +1,11 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const s = await serveRepo(); const b = await chromium.launch();
+const p = await b.newPage({ viewport:{width:1600,height:900} });
+await p.goto(s.origin+'/index.html?screen=race&racer=pikachu&track=pallet-town&lap=2&pos=1&coins=10&item=thunder');
+await p.waitForFunction(()=>window.__pkr && window.__pkr.isReady===true);
+const dump = async(tag)=>console.log(tag, JSON.stringify(await p.evaluate(()=>{const st=window.__pkr.state();const o={};for(const k of Object.keys(st)){const v=st[k];o[k]=(v&&typeof v==='object')?(Array.isArray(v)?'arr'+v.length:'obj'):v;}return o;})));
+await dump('T0');
+await p.evaluate(()=>window.__pkr.step(20000));
+await dump('T20');
+await b.close(); await s.close();

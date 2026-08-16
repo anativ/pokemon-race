@@ -23,8 +23,10 @@ export const ITEMS = Object.freeze([
     boost: 1, weight: 'mid' },
   { id: 'thunderbolt', name: 'Thunderbolt', kind: 'field', color: '#ffd63b',
     spin: 0.7, weight: 'rare' },
+  // reach is deliberately short: the flame has to END on a kart the player can
+  // actually see burn, not mow down rivals somewhere off past the horizon.
   { id: 'hyper-beam', name: 'Hyper Beam', kind: 'beam', color: '#ffe98a',
-    reach: 1100, spin: 1.1, maxHits: 3, weight: 'rare' },
+    reach: 330, sweep: 2400, spin: 1.1, maxHits: 3, weight: 'rare' },
 ]);
 
 const BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
@@ -33,10 +35,34 @@ export function getItem(id) { return BY_ID.get(id) || null; }
 
 /** Lanes the pickups float in - same columns the world renderer draws. */
 export const PICKUP_LANES = Object.freeze([-0.62, -0.21, 0.21, 0.62]);
-/** Seconds a collected ball stays gone before it pops back in. */
-export const PICKUP_RESPAWN = 3.2;
+/** Seconds a collected ball stays visually gone before it pops back in. */
+export const PICKUP_RESPAWN = 1.25;
 /** Lane half-width that counts as "drove through the ball". */
 const PICKUP_LANE_R = 0.30;
+
+/** Longest gap (in lap fraction) allowed between two rows of Poke Balls. */
+const ROW_GAP = 0.12;
+
+/**
+ * Row positions for a track: the declared `itemRows` plus evenly spaced extra
+ * rows filling any gap longer than ROW_GAP. The track data only names three or
+ * four rows a lap, which leaves the road empty for most of a lap; the reference
+ * shot has Poke Balls in view essentially all the time, so we subdivide.
+ * Deterministic (pure function of the track), and the declared rows are always
+ * kept exactly where the world renderer floats its own balls.
+ */
+export function pickupRows(track) {
+  const src = track.itemRows.slice().sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < src.length; i++) {
+    const a = src[i];
+    const b = i + 1 < src.length ? src[i + 1] : src[0] + 1;
+    out.push(a % 1);
+    const n = Math.max(1, Math.round((b - a) / ROW_GAP));
+    for (let k = 1; k < n; k++) out.push((a + ((b - a) * k) / n) % 1);
+  }
+  return out.sort((x, y) => x - y);
+}
 
 /**
  * One entity per (row, lane). `dist` is the lap-relative distance of the row,
@@ -44,7 +70,7 @@ const PICKUP_LANE_R = 0.30;
  */
 export function buildPickups(track) {
   const out = [];
-  track.itemRows.forEach((t, row) => {
+  pickupRows(track).forEach((t, row) => {
     PICKUP_LANES.forEach((lane, col) => {
       out.push({
         key: `${row}:${col}`, row, col, lane,
@@ -108,7 +134,8 @@ export function rollItem(race, r) {
 export function collectPickups(race, r, before) {
   const lapLen = race.lapLen;
   for (const p of race.pickups) {
-    if (p.cool > 0) continue;
+    // The ball only *looks* gone while it respawns - a whole pack sweeping the
+    // same row all get their item, the way a kart racer expects.
     if (Math.abs(r.lane - p.lane) > PICKUP_LANE_R) continue;
     if (!crossedRow(lapLen, before, r.dist, p.dist)) continue;
     p.cool = PICKUP_RESPAWN;
@@ -181,7 +208,11 @@ export function fireItem(race, r) {
     // front of the firer for as long as it burns.
     race.beams.push({
       owner: r.id, item: item.id, lane: r.lane, dist: r.dist,
-      reach: item.reach || 1400, life: 0, ttl: 1.5, hits: [],
+      reach: item.reach || 330, sweep: item.sweep || 900,
+      // `front` is how far down the road the flame has actually licked; it
+      // grows over the first frames so a rival is struck when the plume gets
+      // to them, and the burst lands where the flame tip is on screen.
+      front: 0, life: 0, ttl: 1.15, hits: [], target: null,
       isPlayer: r.isPlayer, color: item.color,
     });
     race.shock = Math.max(race.shock, 0.55);
@@ -191,7 +222,7 @@ export function fireItem(race, r) {
   // Projectile: launched from the nose of the kart, aimed straight ahead.
   race.projectiles.push({
     owner: r.id, item: item.id, kind: item.kind, color: item.color,
-    dist: r.dist + 12, lane: r.lane, speed: (r.speed || 0) + (item.speed || 260),
+    dist: r.dist + 42, lane: r.lane, speed: (r.speed || 0) + (item.speed || 260),
     life: 0, ttl: (item.range || 900) / (item.speed || 260) + 0.6,
     homing: !!item.homing, isPlayer: r.isPlayer,
   });
@@ -204,6 +235,9 @@ export function applyHit(race, target, item, from) {
   const soften = 1 / (0.75 + target.phys.mass * 0.35);
   target.spun = Math.max(target.spun, (item.spin || 1) * soften);
   target.spinDir = target.lane >= 0 ? 1 : -1;
+  // Immediate knock, so the hit shows up in state() on the very same step even
+  // if the field is stationary (e.g. an item fired on the grid).
+  target.lane = Math.max(-1.02, Math.min(1.02, target.lane + target.spinDir * 0.14));
   target.speed *= 0.55;
   target.boost = 0;
   target.boostT = 0;
@@ -265,16 +299,22 @@ export function updateOrdnance(race, dt) {
     b.life += dt;
     const owner = race.racers.find((r) => r.id === b.owner);
     if (owner) { b.dist = owner.dist; b.lane += (owner.lane - b.lane) * Math.min(1, dt * 6); }
+    b.front = Math.min(b.reach, b.front + (b.sweep || 900) * dt);
     const item = getItem(b.item) || { spin: 1.5 };
     const cap = (getItem(b.item) || {}).maxHits || 3;
+    // the nearest rival still in the cone is the one the flame is burning; the
+    // effects layer pins the plume's fireball onto them.
+    let lockGap = Infinity;
+    b.target = null;
     for (const o of race.racers) {
       if (o.id === b.owner || o.finished) continue;
-      if (b.hits.length >= cap) break;
-      if (b.hits.includes(o.id)) continue;
       let gap = o.dist - b.dist;
       while (gap < -lapLen / 2) gap += lapLen;
-      if (gap < 8 || gap > b.reach) continue;
-      if (Math.abs(o.lane - b.lane) > 0.75) continue;
+      if (gap < 12 || gap > b.reach) continue;
+      if (Math.abs(o.lane - b.lane) > 1.15) continue;
+      if (gap < lockGap) { lockGap = gap; b.target = o.id; }
+      if (b.hits.length >= cap || b.hits.includes(o.id)) continue;
+      if (gap > b.front || Math.abs(o.lane - b.lane) > 0.85) continue;
       b.hits.push(o.id);
       applyHit(race, o, item, owner);
     }

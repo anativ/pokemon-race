@@ -1,0 +1,10 @@
+import { serveRepo } from './../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, server } = await serveRepo();
+const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1600,height:900}});
+await p.goto(origin+'/index.html?screen=race&track=pallet-town&racer=pikachu');
+await p.waitForFunction('window.__pkr && window.__pkr.isReady');
+await p.evaluate(()=>window.__pkr.step(4000));
+console.log(await p.evaluate(()=>{const s=window.__pkr.state();return JSON.stringify(Object.keys(s))}));
+console.log(await p.evaluate(()=>{const s=window.__pkr.state();const r=s.racers||[];return JSON.stringify(r[0])}));
+await b.close(); server.close();

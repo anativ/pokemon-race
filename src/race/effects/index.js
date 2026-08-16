@@ -99,41 +99,153 @@ function gapTo(lapLen, camDist, dist) {
 
 // ---------------------------------------------------------------- painting
 
-function drawPickups(view3, race, w, h, t) {
-  // The world renderer floats its Poke Balls from 138 units out; everything
-  // nearer than that is ours, which is what puts a big glossy ball right in
-  // front of the kart the way the reference shot does.
+/**
+ * HUD safe zones on the 1600x900 stage (owned by src/hud/*). A pickup whose
+ * sprite spills into one of these fades out rather than painting over the lap
+ * pill, the coin counter, the position badge or the minimap column.
+ */
+const HUD_ZONES = Object.freeze([
+  { x: 0, y: 0, w: 430, h: 152 },        // avatar + item slot + coin pill
+  { x: 1352, y: 0, w: 248, h: 176 },     // position badge
+  { x: 20, y: 762, w: 320, h: 138 },     // "Lap n/3" pill
+  { x: 1236, y: 452, w: 364, h: 448 },   // minimap, standings tokens, logo
+]);
+
+/** How much of a circle's bounding box lands inside a HUD zone (0..1). */
+function hudCover(x, y, r) {
+  const bx = x - r; const by = y - r; const bs = r * 2;
+  let worst = 0;
+  for (const z of HUD_ZONES) {
+    const ox = Math.min(bx + bs, z.x + z.w) - Math.max(bx, z.x);
+    const oy = Math.min(by + bs, z.y + z.h) - Math.max(by, z.y);
+    if (ox <= 0 || oy <= 0) continue;
+    worst = Math.max(worst, (ox * oy) / (bs * bs));
+  }
+  return worst;
+}
+
+/**
+ * Screen silhouettes of every kart on screen, tagged with their camera depth.
+ * Anything drawn on this layer that sits FURTHER from the camera than a kart is
+ * clipped against these, so a Poke Ball can never paint over a rider's face.
+ */
+function kartOccluders(view3, race, w, h) {
+  const out = [];
+  for (const r of race.racers) {
+    const at = placeRacer(view3, race, r, w, h);
+    if (!at || at.s < 6) continue;
+    out.push({
+      dz: at.dz,
+      x: at.x,
+      y: at.y - at.s * 0.85,           // mid-height of chassis + rider
+      rx: at.s * 1.08,                 // half body width + the wheels
+      ry: at.s * 1.15,                 // up to the ears, down to the tyres
+    });
+  }
+  return out;
+}
+
+/**
+ * Overlapping cut-outs would XOR each other back open under an even-odd clip,
+ * so any two silhouettes that touch are merged into their bounding ellipse
+ * first. Over-clipping is always safe (the pixel behind two karts was never
+ * visible anyway); under-clipping is what paints a ball on a rider's face.
+ */
+function mergeOccluders(list) {
+  const out = list.map((o) => ({ ...o }));
+  for (let pass = 0; pass < 3; pass++) {
+    let merged = false;
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        const a = out[i]; const b = out[j];
+        if (Math.abs(a.x - b.x) > a.rx + b.rx) continue;
+        if (Math.abs(a.y - b.y) > a.ry + b.ry) continue;
+        const x0 = Math.min(a.x - a.rx, b.x - b.rx);
+        const x1 = Math.max(a.x + a.rx, b.x + b.rx);
+        const y0 = Math.min(a.y - a.ry, b.y - b.ry);
+        const y1 = Math.max(a.y + a.ry, b.y + b.ry);
+        out[i] = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, rx: (x1 - x0) / 2, ry: (y1 - y0) / 2 };
+        out.splice(j, 1);
+        j--;
+        merged = true;
+      }
+    }
+    if (!merged) break;
+  }
+  return out;
+}
+
+/** Clip `draw` to everything except the karts nearer to the camera than `dz`. */
+function behindKarts(cc, occ, dz, draw) {
+  const near = mergeOccluders(occ.filter((o) => o.dz < dz - 2));
+  if (!near.length) { draw(cc); return; }
+  cc.save();
+  cc.beginPath();
+  cc.rect(0, 0, STAGE_W, STAGE_H);
+  for (const o of near) {
+    cc.moveTo(o.x + o.rx, o.y);
+    cc.ellipse(o.x, o.y, o.rx, o.ry, 0, 0, Math.PI * 2, true);
+  }
+  cc.clip('evenodd');
+  draw(cc);
+  cc.restore();
+}
+
+/**
+ * Poke Ball pickups.
+ *
+ * These are the live, collectable rows (the world renderer only floats the few
+ * rows declared on the track, from 138 units out). They use the SAME radius
+ * formula and bob as the world's, so where the two ranges overlap they land on
+ * top of each other exactly instead of doubling up. Three rules keep them where
+ * the reference puts them: the radius is capped at roughly the hero kart's
+ * wheel height, every ball is depth-tested against the karts (a kart nearer to
+ * the camera clips it), and a ball drifting into a HUD safe zone fades out.
+ */
+const R_CAP = 46;                         // ~ the hero kart's wheel height
+
+function drawPickups(view3, race, w, h, t, occ) {
   const list = [];
   for (const p of race.pickups) {
-    if (p.cool > 0) continue;
     for (let k = 0; k <= 1; k++) {
       const d = gapTo(race.lapLen, cam.dist, p.dist + k * race.lapLen);
-      if (d < 34 || d >= 140) continue;
+      if (d < 26 || d >= view3.maxZ * 0.56) continue;
       const at = placeWorld(view3, d, p.lane);
       if (!at) continue;
-      list.push({ at, d, lane: p.lane });
+      list.push({ at, d, lane: p.lane, cool: p.cool });
     }
   }
   list.sort((a, b) => b.d - a.d);
   for (const it of list) {
-    const r = Math.min(72, it.at.w * 0.082);
-    if (r < 2) continue;
-    const bob = Math.sin(t * 2.4 + it.lane * 3 + it.d * 0.01) * r * 0.3;
+    const r = Math.min(R_CAP, it.at.w * 0.078);
+    if (r < 2.5) continue;
+    const bob = Math.sin(t * 2.4 + it.lane * 3 + it.d * 0.01) * r * 0.35;
     const y = it.at.y - r * 1.9 + bob;
-    paint.withAlpha(c, 1 - Math.min(0.9, it.at.fog), (cc) => {
-      cc.save();
-      cc.globalAlpha *= 0.35;
-      cc.fillStyle = '#101820';
-      cc.beginPath();
-      cc.ellipse(it.at.x, it.at.y, r * 0.9, r * 0.3, 0, 0, Math.PI * 2);
-      cc.fill();
-      cc.restore();
-      paint.pokeball(cc, it.at.x, y, r, t * 2 + it.lane);
+    let alpha = 1 - Math.min(0.92, it.at.fog);
+    // collected balls shrink away and pop back when they respawn
+    let scale = 1;
+    if (it.cool > 0) {
+      const k = Math.max(0, Math.min(1, it.cool / 1.25));
+      scale = 0.55 + (1 - k) * 0.45;
+      alpha *= 0.30 + (1 - k) * 0.55;
+    }
+    const rr = r * scale;
+    // never sit on the HUD: fade out as the sprite creeps into a safe zone
+    const cover = hudCover(it.at.x, y, rr * 1.15);
+    if (cover > 0.34) continue;
+    alpha *= 1 - Math.min(1, cover / 0.34);
+    if (alpha < 0.03) continue;
+    behindKarts(c, occ, it.d, () => {
+      paint.withAlpha(c, alpha, (cc) => {
+        const lift = Math.max(0, Math.min(1.3, (it.at.y - y) / (rr * 2.4)));
+        paint.ballShadow(cc, it.at.x, it.at.y, rr * 1.05, lift);
+        paint.pokeball(cc, it.at.x, y, rr, t * 2.4 + it.lane * 2.2);
+      });
     });
   }
 }
 
-function drawKartFx(view3, race, w, h, t) {
+function drawKartFx(view3, race, w, h, t, occ) {
   const list = [];
   for (const r of race.racers) {
     const at = placeRacer(view3, race, r, w, h);
@@ -144,6 +256,18 @@ function drawKartFx(view3, race, w, h, t) {
   for (const { r, at } of list) {
     const a = 1 - Math.min(0.9, at.fog);
     if (a < 0.05) continue;
+    // a rival's flames/stars belong to that rival's depth slot
+    const near = occ ? mergeOccluders(occ.filter((o) => o.dz < at.dz - 8)) : [];
+    if (near.length) {
+      c.save();
+      c.beginPath();
+      c.rect(0, 0, STAGE_W, STAGE_H);
+      for (const o of near) {
+        c.moveTo(o.x + o.rx, o.y);
+        c.ellipse(o.x, o.y, o.rx, o.ry, 0, 0, Math.PI * 2, true);
+      }
+      c.clip('evenodd');
+    }
     if (r.boost > 0.08) {
       // twin exhaust flames off the back corners, not one blob under the kart
       paint.withAlpha(c, a * Math.min(1, r.boost * 1.2), (cc) => {
@@ -172,18 +296,162 @@ function drawKartFx(view3, race, w, h, t) {
         paint.pickupPop(cc, at.x, at.y - at.s * 0.5, at.s * 0.4, 1 - r.pickupGlow, 1);
       });
     }
+    if (near.length) c.restore();
   }
 }
 
-function drawOrdnance(view3, race, w, h, t) {
+// ------------------------------------------------------------- Hyper Beam
+//
+// The jet is deliberately SHORT: a flame plume about one and a half kart
+// lengths long, pinned to the tarmac and pointed down the racing line at the
+// rival directly ahead - the Charizard fire-breath of the reference item
+// panel - rather than a lance that leaves the road and crosses the frame.
+
+const JET_NOSE_LIFT = 0.12;  // muzzle height above the ground point, in kart sizes
+const JET_NOSE_W = 0.36;     // half width at the muzzle, in firer-kart sizes
+const JET_FLOAT = 0.035;     // how far the flame core floats over the tarmac
+const JET_FREE_RUN = 190;    // forward run (world units) when nothing is in range
+const JET_MIN_GAP = 74;      // below this the world does not draw the rival at all
+const JET_LOCK_LANE = 1.15;  // lane half-window the jet can lock onto
+const JET_LOCK_MAX = 185;    // furthest kart the plume will stretch to reach
+const JET_MAX_SPAN = 470;    // ...and the furthest it may stretch on screen (px)
+
+/** Flame width profile: swells just off the muzzle, then narrows to the impact. */
+function jetShape(f) {
+  if (f < 0.16) return 0.84 + (f / 0.16) * 0.16;
+  const k = (f - 0.16) / 0.84;
+  return 1 - 0.34 * Math.pow(k, 1.6);
+}
+
+/**
+ * The kart the jet is burning: the nearest rival ahead of the firer, inside the
+ * beam's reach and roughly in the same lane band. It anchors the tip of the
+ * plume, so the flame always ENDS on a kart instead of fading into thin air.
+ */
+function beamTarget(race, b, owner) {
+  // the sim names the kart it is burning; fall back to a local search so the
+  // plume still lands on something if a sim provider does not set it
+  if (b.target) {
+    const o = race.racers.find((r) => r.id === b.target);
+    const g = o ? gapTo(race.lapLen, owner.dist, o.dist) : 0;
+    if (o && !o.finished && g > JET_MIN_GAP) return { racer: o, gap: g };
+  }
+  let target = null;
+  let bestGap = Infinity;
+  for (const o of race.racers) {
+    if (o.id === b.owner || o.finished) continue;
+    const g = gapTo(race.lapLen, owner.dist, o.dist);
+    if (g <= JET_MIN_GAP || g > (b.reach || 330) || g >= bestGap) continue;
+    if (Math.abs(o.lane - b.lane) > JET_LOCK_LANE) continue;
+    bestGap = g; target = o;
+  }
+  return target ? { racer: target, gap: bestGap } : null;
+}
+
+/**
+ * Build the plume: a ground-level flame cone that leaves the firer's nose at
+ * road height, follows the tarmac forward (so it bends with the circuit and
+ * never leaves the road plane) and terminates ON the struck kart.
+ *
+ * Returns `{ sp, tip }` where `sp` is the spine (`{x,y,w}` screen points) and
+ * `tip` is the impact anchor, or `null` if nothing can be drawn this frame.
+ */
+function beamPlume(view3, race, b, owner, from, lock, w, h) {
+  // Depth is measured exactly the way the world renderer places karts: the hero
+  // kart's sprite sits at CAM_BACK, a rival's at its raw gap from the camera.
+  // Working in that same space is what welds the flame to what is on screen.
+  const fromZ = from.dz;
+
+  // how far the flame has licked down the road this frame - it grows out of the
+  // nose over the first frames instead of popping in at full length
+  const front = b.front == null ? JET_FREE_RUN : Math.max(30, b.front);
+
+  // where the flame lands: the struck kart's own screen box, once the plume has
+  // actually reached them
+  let hitAt = null;
+  if (lock && lock.gap <= front + 2 && lock.gap <= JET_LOCK_MAX) {
+    hitAt = placeRacer(view3, race, lock.racer, w, h);
+  }
+  // a kart the world draws nearer than the firer cannot anchor a forward jet
+  if (hitAt && hitAt.dz <= fromZ + 24) hitAt = null;
+  // ...nor can one so far up the road that the jet would stripe the frame
+  if (hitAt && Math.hypot(hitAt.x - from.x, hitAt.y - from.y) > JET_MAX_SPAN) hitAt = null;
+  const toZ = hitAt
+    ? hitAt.dz
+    : fromZ + Math.min(front, JET_FREE_RUN);
+  const aimLane = hitAt ? lock.racer.lane : b.lane;
+  if (toZ <= fromZ + 8) return null;
+
+  const muzzle = { x: from.x, y: from.y - from.s * JET_NOSE_LIFT };
+  const tipLift = hitAt ? hitAt.s * 0.30 : 0;
+
+  const tipW = hitAt ? Math.max(3, hitAt.s * 0.44) : Math.max(2, from.s * 0.10);
+  const noseW = from.s * JET_NOSE_W;
+
+  // Sample the tarmac between the two karts, stepping in 1/z so the samples
+  // land evenly across the screen instead of piling up in the near field.
+  const raw = [];
+  const N = 20;
+  for (let i = 0; i <= N; i++) {
+    const f = i / N;
+    const dz = (fromZ * toZ) / (toZ + f * (fromZ - toZ));
+    const at = placeWorld(view3, dz, b.lane + (aimLane - b.lane) * f);
+    if (!at) return null;
+    raw.push({ f, x: at.x, y: at.y - at.w * JET_FLOAT, rw: at.w });
+  }
+
+  // Weld the ends: the near end onto the firer's nose, the far end onto the
+  // struck kart. Both corrections are tiny in-plane nudges (the road sample at
+  // the target's depth and lane already IS where its kart is drawn), so the
+  // plume never leaves the road plane.
+  const dx0 = muzzle.x - raw[0].x;
+  const dy0 = muzzle.y - raw[0].y;
+  const dx1 = (hitAt ? hitAt.x : raw[N].x) - raw[N].x;
+  const dy1 = (hitAt ? hitAt.y - tipLift : raw[N].y) - raw[N].y;
+
+  let sp = raw.map((p) => {
+    // gentle, monotone weld - a steep decay here is what used to kick the near
+    // end of the plume up off the tarmac in a hook
+    const a = Math.pow(1 - p.f, 1.5);
+    const bl = Math.pow(p.f, 1.5);
+    return {
+      x: p.x + dx0 * a + dx1 * bl,
+      y: p.y + dy0 * a + dy1 * bl,
+      w: Math.max(1.5, (noseW + (tipW - noseW) * p.f) * jetShape(p.f)),
+    };
+  });
+  // With nothing to hit the plume still has to stop somewhere sane: cut it at a
+  // fixed screen length rather than let it stripe the whole frame.
+  let cut = sp.length - 1;
+  if (!hitAt) {
+    for (let i = 1; i < sp.length; i++) {
+      if (Math.hypot(sp[i].x - sp[0].x, sp[i].y - sp[0].y) > JET_MAX_SPAN) { cut = i; break; }
+    }
+    if (cut < 3) cut = Math.min(3, sp.length - 1);
+    sp = sp.slice(0, cut + 1);
+  }
+
+  // The plume ALWAYS ends in fire - on the struck kart when there is one, and
+  // otherwise as a ball of flame rolling along the tarmac. It must never just
+  // thin out into empty air.
+  const end = sp[sp.length - 1];
+  const burn = hitAt
+    ? { x: hitAt.x, y: hitAt.y - hitAt.s * 0.50, r: Math.min(hitAt.s * 0.60, 78), dz: hitAt.dz }
+    : { x: end.x, y: end.y, r: clamp(raw[cut].rw * 0.048, 12, 46), dz: raw[cut].f * (toZ - fromZ) + fromZ };
+  return { sp, burn, tip: hitAt, target: lock ? lock.racer : null };
+}
+
+function drawOrdnance(view3, race, w, h, t, occ) {
   for (const p of race.projectiles) {
     const d = gapTo(race.lapLen, cam.dist, p.dist);
     if (d < 10 || d > view3.maxZ * 0.5) continue;
     const at = placeWorld(view3, d, p.lane);
     if (!at) continue;
-    const r = Math.max(3, Math.min(46, at.w * 0.055));
-    paint.withAlpha(c, 1 - Math.min(0.85, at.fog), (cc) => {
-      paint.projectile(cc, at.x, at.y - r * 1.3, r, p.color || '#e8433c', p.life * 6);
+    const r = Math.max(3, Math.min(40, at.w * 0.055));
+    behindKarts(c, occ, d, () => {
+      paint.withAlpha(c, 1 - Math.min(0.85, at.fog), (cc) => {
+        paint.projectile(cc, at.x, at.y - r * 1.3, r, p.color || '#e8433c', p.life * 6);
+      });
     });
   }
 
@@ -192,28 +460,46 @@ function drawOrdnance(view3, race, w, h, t) {
     if (!owner) continue;
     const from = placeRacer(view3, race, owner, w, h);
     if (!from) continue;
-    // The lance follows the tarmac: sampled along the road from just past the
-    // kart's nose, so on a bend it curves with the circuit instead of shooting
-    // off into the scenery.
-    const base = owner.isPlayer ? CAM_BACK : gapTo(race.lapLen, cam.dist, owner.dist);
-    const pts = [];
-    const span = Math.min(b.reach, 520);
-    for (let i = 0; i <= 12; i++) {
-      const f = i / 12;
-      const at = placeWorld(view3, base + 74 + f * span, b.lane);
-      if (!at) break;
-      pts.push({
-        x: at.x,
-        y: at.y - at.w * 0.13,
-        w: Math.max(2, at.w * 0.085 * (1 - f * 0.4)),
+    const lock = beamTarget(race, b, owner);
+    const plume = beamPlume(view3, race, b, owner, from, lock, w, h);
+    if (!plume) continue;
+    const t01 = clamp(b.life / b.ttl, 0, 1);
+
+    // The jet travels away from its firer, so only karts between the camera and
+    // the firer can be in front of it. The firer's own body is cut out too -
+    // the flame streams out from under the nose instead of over the face.
+    const near = mergeOccluders(occ.filter((o) => o.dz < from.dz - 8));
+    c.save();
+    c.beginPath();
+    c.rect(0, 0, STAGE_W, STAGE_H);
+    for (const o of near) {
+      c.moveTo(o.x + o.rx, o.y);
+      c.ellipse(o.x, o.y, o.rx, o.ry, 0, 0, Math.PI * 2, true);
+    }
+    // Cut out the firer's rider and upper chassis - everything from ~0.5 kart
+    // heights up - but leave the ground-level band around the nose open. The
+    // flame is therefore always seen leaving the tarmac in front of the kart and
+    // can never be painted across the rider's face.
+    c.moveTo(from.x + from.s * 0.46, from.y - from.s * 1.30);
+    c.ellipse(from.x, from.y - from.s * 1.30, from.s * 0.46, from.s * 0.80,
+      0, 0, Math.PI * 2, true);
+    c.clip('evenodd');
+    paint.flameJet(c, plume.sp, t01);
+    c.restore();
+
+    // ...and it ends in a fireball rolling over the kart it is burning.
+    // NOTE: the depth passed here is the target's own, not target+6 - a fireball
+    // that is meant to engulf a kart must not be clipped by that kart.
+    if (plume.burn) {
+      const bn = plume.burn;
+      behindKarts(c, occ, bn.dz, () => {
+        paint.flameImpact(c, bn.x, bn.y, bn.r, t01, b.life);
       });
     }
-    if (pts.length < 2) continue;
-    paint.beamPath(c, pts, clamp(b.life / b.ttl, 0, 1), b.color || '#ffe98a');
   }
 }
 
-function drawEvents(view3, race, w, h) {
+function drawEvents(view3, race, w, h, occ) {
   for (const item of live) {
     const { ev } = item;
     const t01 = clamp(item.age / item.life, 0, 1);
@@ -221,17 +507,43 @@ function drawEvents(view3, race, w, h) {
       const target = ev.type === 'hit' ? race.racers.find((r) => r.id === ev.id) : null;
       let at = null;
       let size = 40;
+      let dz = Infinity;
       if (target) {
         const p = placeRacer(view3, race, target, w, h);
-        if (p) { at = p; size = p.s * 0.7; }
+        // capped: a fireball on the hero kart must engulf it, not the frame
+        if (p) {
+          at = { x: p.x, y: p.y - p.s * 0.40 };
+          // rivals get engulfed; on the hero kart it stays a scorch so the
+          // player can still see what they are driving
+          size = target.isPlayer ? Math.min(p.s * 0.26, 40) : Math.min(p.s * 0.40, 56);
+          dz = p.dz;
+        }
       } else {
         const d = gapTo(race.lapLen, cam.dist, ev.dist || 0);
         const p = d > 8 ? placeWorld(view3, d, ev.lane || 0) : null;
-        if (p) { at = { x: p.x, y: p.y - p.w * 0.08 }; size = Math.min(70, p.w * 0.08); }
+        if (p) {
+          at = { x: p.x, y: p.y - p.w * 0.08 };
+          size = Math.min(70, p.w * 0.08);
+          dz = d;
+        }
       }
       if (!at) continue;
       const def = getItem(ev.item);
-      paint.burst(c, at.x, at.y, size, def ? def.color : '#ffd63b', t01);
+      // fire is for things that explode: a Thunderbolt zaps the whole field at
+      // once, so it stays an electric pop or the frame turns into a bonfire
+      const fiery = !def || def.kind === 'beam' || def.kind === 'projectile';
+      // a blast wraps its own kart but still sits behind anything closer to the
+      // camera, so the field never loses its depth order
+      // a blast that lands ON a kart is drawn at that kart's own depth, so its
+      // own silhouette does not clip the fire off it
+      behindKarts(c, occ, target ? dz : dz + 6, () => {
+        if (fiery) {
+          // a kart taking a hit is swallowed by a fireball, the way the item
+          // panel of the reference sheet shows it
+          paint.fireBurst(c, at.x, at.y, size * (target ? 1.15 : 0.9), t01);
+        }
+        paint.burst(c, at.x, at.y, size * 0.8, def ? def.color : '#ffd63b', t01);
+      });
     }
   }
 }
@@ -324,10 +636,13 @@ register({
       c.scale(1.06, 1.06);
       c.translate(-w / 2, -h / 2);
     }
-    drawPickups(view3, race, w, h, t);
-    drawKartFx(view3, race, w, h, t);
-    drawOrdnance(view3, race, w, h, t);
-    drawEvents(view3, race, w, h);
+    // one depth queue for the whole layer: the karts' screen silhouettes are
+    // the occluders every pickup / projectile / beam is tested against
+    const occ = kartOccluders(view3, race, w, h);
+    drawPickups(view3, race, w, h, t, occ);
+    drawKartFx(view3, race, w, h, t, occ);
+    drawOrdnance(view3, race, w, h, t, occ);
+    drawEvents(view3, race, w, h, occ);
     c.restore();
 
     drawFieldFlash(race, w, h);

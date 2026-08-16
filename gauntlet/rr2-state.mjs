@@ -1,0 +1,16 @@
+import { serveRepo } from './../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, server } = await serveRepo();
+const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1600,height:900}});
+const errs=[]; p.on('console',m=>{if(m.type()==='error')errs.push(m.text())}); p.on('pageerror',e=>errs.push(''+e));
+await p.goto(origin+'/index.html?screen=race&track=pallet-town&racer=pikachu');
+await p.waitForFunction('window.__pkr && window.__pkr.isReady');
+await p.evaluate(()=>window.__pkr.seed(7));
+await p.evaluate(()=>window.__pkr.step(4000));
+const s1=await p.evaluate(()=>{const s=window.__pkr.state();const r=s.racers||s.race?.racers||[];return {n:r.length, ids:[...new Set(r.map(x=>x.id))].length, pos:r.map(x=>x.position).sort((a,b)=>a-b).join(','), prog:r.map(x=>+(x.progress??x.dist??0).toFixed(1))};});
+console.log('t4000',JSON.stringify(s1));
+await p.evaluate(()=>window.__pkr.step(26000));
+const s2=await p.evaluate(()=>{const s=window.__pkr.state();const r=s.racers||s.race?.racers||[];return {n:r.length, pos:r.map(x=>x.position).sort((a,b)=>a-b).join(','), prog:r.map(x=>+(x.progress??x.dist??0).toFixed(1)), lap:r.map(x=>x.lap)};});
+console.log('t30000',JSON.stringify(s2));
+console.log('ERRS',errs.length,errs.slice(0,3));
+await b.close(); server.close();

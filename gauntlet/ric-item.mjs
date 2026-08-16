@@ -1,0 +1,35 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const item = process.argv[2] || 'hyper-beam';
+const tag = process.argv[3] || item;
+const { origin, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const errs = [];
+page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+page.on('pageerror', e => errs.push('pageerror: ' + e.message));
+await page.goto(`${origin}/index.html?screen=race&track=pallet-town&racer=pikachu&item=${item}`, { waitUntil: 'load' });
+await page.waitForFunction(() => window.__pkr?.isReady === true, null, { timeout: 15000 });
+await page.evaluate(() => window.__pkr.seed(7));
+await page.evaluate(() => window.__pkr.step(6000));
+await page.waitForTimeout(300);
+const before = await page.evaluate(() => {
+  const r = window.__pkr.state().race || {};
+  return { item: (r.racers || []).find(x => x.id === r.playerId)?.item, hits: (r.racers || []).map(x => [x.id, x.spun || x.stun || x.hit || 0]) };
+});
+console.log('BEFORE', JSON.stringify(before));
+await page.screenshot({ path: `gauntlet/shots/ri-crit-r1-${tag}-before.png` });
+await page.keyboard.press('Space');
+await page.evaluate(() => window.__pkr.step(200));
+await page.waitForTimeout(200);
+await page.screenshot({ path: `gauntlet/shots/ri-crit-r1-${tag}-mid.png` });
+await page.evaluate(() => window.__pkr.step(300));
+await page.waitForTimeout(200);
+await page.screenshot({ path: `gauntlet/shots/ri-crit-r1-${tag}-after.png` });
+const after = await page.evaluate(() => {
+  const r = window.__pkr.state().race || {};
+  return { item: (r.racers || []).find(x => x.id === r.playerId)?.item, racers: (r.racers || []).map(x => ({ id: x.id, spin: x.spinT || x.spin || 0, stun: x.stunT || x.stun || 0, speed: Math.round(x.speed || 0) })) };
+});
+console.log('AFTER', JSON.stringify(after));
+console.log('ERRORS', errs.length, errs.slice(0, 4).join(' | '));
+await browser.close(); await close();

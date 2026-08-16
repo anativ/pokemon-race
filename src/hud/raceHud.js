@@ -15,7 +15,10 @@ import { trackOr } from '../data/tracks.js';
 import { avatarSvg } from '../core/avatars.js';
 import { logoHtml, ordinalSuffix } from '../core/ui.js';
 import { itemSvg, itemId, itemName } from './items.js';
-import { minimapSvg } from './minimap.js';
+import { minimapSvg, updateMinimap } from './minimap.js';
+
+/** Corner map width; the reference map fills a big slice of the bottom-right. */
+const MAP_W = 320;
 
 const COIN = `<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
   <circle cx="20" cy="20" r="17" fill="#f0a90f" stroke="#8a5405" stroke-width="3"/>
@@ -27,6 +30,17 @@ const COIN = `<svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"
 /** URL item, used only while the lights are still on (sim rejects aliases). */
 function urlItem() {
   try { return new URLSearchParams(location.search).get('item'); } catch { return null; }
+}
+
+/**
+ * True only for an item *the player used*. The race sim tags every item event
+ * with `by` (the racer id); the shell sim's player path omits `by` entirely, so
+ * a missing `by` also counts as the player. Without this filter the HUD banner
+ * announces whatever a rival just fired.
+ */
+function isPlayerItem(e, race) {
+  if (!e || e.type !== 'item' || e.id === undefined) return false;
+  return e.by === undefined || e.by === null || e.by === race.playerId;
 }
 
 export default {
@@ -69,7 +83,7 @@ export default {
         </div>
 
         <div class="hud-br">
-          <div class="hud-map"><div class="map-inner" data-minimap>${minimapSvg(track, race, 244)}</div></div>
+          <div class="hud-map"><div class="map-inner" data-minimap>${minimapSvg(track, race, MAP_W)}</div></div>
           <div class="hud-mark">${logoHtml(0.5)}</div>
         </div>
 
@@ -120,8 +134,10 @@ export default {
     // Item slot: live state. The URL `item=` param is honoured until the sim
     // hands the player a real item (or one is used), so `?item=thunder` shows.
     const live = itemId(hud.item);
-    if (live || (race.events && race.events.some((e) => e.type === 'item'))) this.urlSpent = true;
-    const showItem = live || (this.urlSpent ? null : r.urlItem);
+    // `?item=` pins the slot for the shot it was asked for; the first time the
+    // player actually *uses* an item the slot goes back to live sim state.
+    if (race.events && race.events.some((e) => isPlayerItem(e, race))) this.urlSpent = true;
+    const showItem = this.urlSpent ? live : (r.urlItem || live);
     if (showItem !== L.item) {
       L.item = showItem;
       r.item.innerHTML = showItem ? itemSvg(showItem, 94) : '<span class="slot-empty"></span>';
@@ -129,10 +145,21 @@ export default {
       r.root.dataset.hudItem = showItem || '';
     }
 
-    r.map.innerHTML = minimapSvg(r.track, race, 244);
+    // Chips carry full creature silhouettes, so they are built once and only
+    // re-positioned per frame; a field change falls back to a rebuild.
+    if (!updateMinimap(r.map, r.track, race)) r.map.innerHTML = minimapSvg(r.track, race, MAP_W);
 
-    const ev = race.events && race.events[race.events.length - 1];
-    const flashing = !!(ev && ev.type === 'item' && race.elapsed - ev.t < 1.5);
+    // Only the PLAYER's own item use raises the centre flash. `race/items.js`
+    // pushes an `item` event for every racer (`by` = who used it), so taking the
+    // last event outright made the banner announce rivals' items over the
+    // player's own slot. Walk back to the newest event the player owns.
+    let ev = null;
+    if (race.events) {
+      for (let i = race.events.length - 1; i >= 0; i--) {
+        if (isPlayerItem(race.events[i], race)) { ev = race.events[i]; break; }
+      }
+    }
+    const flashing = !!(ev && race.elapsed - ev.t < 1.5);
     if (flashing) {
       if (r.flash.hidden || r.flash.dataset.of !== ev.id) {
         r.flash.dataset.of = ev.id;

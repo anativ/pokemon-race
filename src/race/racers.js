@@ -60,8 +60,12 @@ export function makeRacer(race, id, gridIndex, opts = {}) {
   // wants a pack, so the stat differences stay ordered but tighter.
   phys.topSpeed = 206 + (phys.topSpeed - 202) * 0.55;
   phys.accel = 70 + (phys.accel - 82) * 0.5;
-  const row = Math.floor(gridIndex / 2);
-  const side = gridIndex % 2 === 0 ? -0.44 : 0.44;
+  // Four across, three rows deep: the field fans out over the width of the
+  // road instead of forming one file behind the hero, which is what puts
+  // rival karts on both shoulders of the chase cam from the first corner.
+  const COLS = [-0.66, -0.24, 0.24, 0.66];
+  const row = Math.floor(gridIndex / 4);
+  const side = COLS[gridIndex % 4];
   return {
     id,
     name: def.name,
@@ -73,7 +77,7 @@ export function makeRacer(race, id, gridIndex, opts = {}) {
     signature: def.item,
     phys,
     grid: gridIndex,
-    dist: -row * 54 - 22,
+    dist: -row * 96 - 24,
     speed: 0,
     lane: side,
     laneTarget: side,
@@ -186,13 +190,24 @@ export function updateRace(race, dt, controls = {}) {
   if (race.phase === 'countdown') {
     race.countdown -= dt;
     race.elapsed = 0;
-    for (const r of race.racers) r.speed = Math.max(0, r.speed * 0.9);
+    for (const r of race.racers) {
+      r.speed = Math.max(0, r.speed * 0.9);
+      if (r.spun > 0) {                       // hit on the grid: keep spinning
+        r.spun = Math.max(0, r.spun - dt * 1.35);
+        r.lane = clamp(r.lane + r.spinDir * 0.35 * dt, -1.02, 1.02);
+      }
+      decay(r, dt);
+    }
     if (race.countdown <= 0) {
       race.countdown = 0;
       race.phase = 'racing';
       race.events.push({ t: 0, type: 'go' });
       pushFx(race, { type: 'go' });
     }
+    // An item fired on the grid still has to fly, so ordnance keeps ticking
+    // through the countdown.
+    updateOrdnance(race, dt);
+    updatePickups(race, dt);
     updateCamera(race, dt);
     syncHud(race);
     return race;

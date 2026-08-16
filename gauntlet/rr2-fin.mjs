@@ -1,0 +1,12 @@
+import { serveRepo } from './../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, server } = await serveRepo();
+const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1600,height:900}});
+const errs=[]; p.on('console',m=>{if(m.type()==='error')errs.push(m.text())}); p.on('pageerror',e=>errs.push(''+e));
+await p.goto(origin+'/index.html?screen=race&track=pallet-town&racer=pikachu');
+await p.waitForFunction('window.__pkr && window.__pkr.isReady');
+await p.evaluate(()=>window.__pkr.seed(3));
+for(let i=0;i<12;i++) await p.evaluate(()=>window.__pkr.step(20000));
+const s=await p.evaluate(()=>{const st=window.__pkr.state();const r=st.race.racers;return{phase:st.race.phase,fin:r.filter(x=>x.finished).length,order:r.slice().sort((a,b)=>a.pos-b.pos).map(x=>x.pos).join(','),res:st.results?st.results.order?.length??Object.keys(st.results).length:null}});
+console.log('FIN',JSON.stringify(s)); console.log('ERRS',errs.length,errs.slice(0,2));
+await b.close(); server.close();

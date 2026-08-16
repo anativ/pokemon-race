@@ -1,0 +1,32 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const errs = [];
+page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
+await page.goto(url + '/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam');
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(() => window.__pkr.step(6000));
+await page.waitForTimeout(200);
+const before = await page.evaluate(() => {
+  const s = window.__pkr.state();
+  return { item: s.race.hud.item, speeds: s.race.racers.map(r => ({ id: r.id, pos: r.pos, sp: +r.speed.toFixed(0) })) };
+});
+console.log('BEFORE item=', JSON.stringify(before.item));
+await page.screenshot({ path: 'gauntlet/shots/ri-r4-beam-before.png' });
+await page.keyboard.press('Space');
+await page.evaluate(() => window.__pkr.step(400));
+await page.waitForTimeout(150);
+await page.screenshot({ path: 'gauntlet/shots/ri-r4-beam-after400.png' });
+const after = await page.evaluate(() => {
+  const s = window.__pkr.state();
+  return { item: s.race.hud.item, speeds: s.race.racers.map(r => ({ id: r.id, pos: r.pos, sp: +r.speed.toFixed(0) })) };
+});
+console.log('AFTER item=', JSON.stringify(after.item));
+const bm = Object.fromEntries(before.speeds.map(r => [r.id, r.sp]));
+const hit = after.speeds.filter(r => r.sp < bm[r.id] - 30).map(r => `${r.id} ${bm[r.id]}->${r.sp}`);
+console.log('hitRivals=' + hit.length, hit.join(' | '));
+console.log('errors=' + errs.length, errs.slice(0, 4));
+await browser.close(); await close();

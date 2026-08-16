@@ -1,0 +1,34 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const errs = [];
+page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+page.on('pageerror', e => errs.push('pageerror: ' + e.message));
+await page.goto(`${origin}/index.html?screen=race&track=pallet-town&racer=pikachu`, { waitUntil: 'load' });
+await page.waitForFunction(() => window.__pkr?.isReady === true, null, { timeout: 20000 });
+await page.evaluate(() => window.__pkr.seed(7));
+await page.evaluate(() => window.__pkr.step(4000));
+await page.waitForTimeout(400);
+await page.screenshot({ path: 'gauntlet/shots/ri-r3-grass-4000.png' });
+const s = await page.evaluate(() => {
+  const r = window.__pkr.state().race || {};
+  const rs = r.racers || [];
+  return { n: rs.length, ids: new Set(rs.map(x => x.id)).size, pos: rs.map(x => x.pos).sort((a, b) => a - b).join(','), pickups: (r.pickups || r.items || []).length };
+});
+console.log('T4000', JSON.stringify(s));
+await page.evaluate(() => window.__pkr.step(13000));
+await page.waitForTimeout(300);
+await page.screenshot({ path: 'gauntlet/shots/ri-r3-grass-17000.png' });
+await page.evaluate(() => window.__pkr.step(13000));
+await page.waitForTimeout(300);
+const s2 = await page.evaluate(() => {
+  const r = window.__pkr.state().race || {};
+  const rs = r.racers || [];
+  return { n: rs.length, pos: rs.map(x => x.pos).sort((a, b) => a - b).join(','), minProg: Math.min(...rs.map(x => x.dist ?? 0)).toFixed(1), maxProg: Math.max(...rs.map(x => x.dist ?? 0)).toFixed(1) };
+});
+console.log('T30000', JSON.stringify(s2));
+await page.screenshot({ path: 'gauntlet/shots/ri-r3-grass-30000.png' });
+console.log('ERRORS', errs.length, errs.slice(0, 5).join(' | '));
+await browser.close(); await close();

@@ -102,7 +102,9 @@ const trackSelect = {
     if (action.includes('down') || action.includes('right')) c = (c + 1) % n;
     else if (action.includes('up') || action.includes('left')) c = (c + n - 1) % n;
     else if (action.includes('confirm')) { this.confirm(ctx); return; }
-    else if (action.includes('back')) { ctx.goto('character-select'); return; }
+    // Going back un-confirms: otherwise `confirmedRacer` stays true forever and
+    // the state snapshot claims a pick the player has walked away from.
+    else if (action.includes('back')) { s.confirmedRacer = false; ctx.goto('character-select'); return; }
     if (c !== s.trackCursor) { s.trackCursor = c; this.paint(ctx); }
   },
 

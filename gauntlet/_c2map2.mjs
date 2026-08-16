@@ -1,0 +1,10 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const s = await serveRepo(); const b = await chromium.launch();
+const p = await b.newPage({ viewport:{width:1600,height:900} });
+await p.goto(s.origin+'/index.html?screen=race&racer=pikachu&track=pallet-town');
+await p.waitForFunction(()=>window.__pkr && window.__pkr.isReady===true);
+await p.evaluate(()=>window.__pkr.step(45000));
+await p.screenshot({path:'gauntlet/shots/hud-r2-map-45s.png', clip:{x:1330,y:540,width:270,height:300}});
+console.log(await p.evaluate(()=>document.querySelectorAll('.mm-dot').length));
+await b.close(); await s.close();

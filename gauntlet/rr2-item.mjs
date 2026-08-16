@@ -1,0 +1,17 @@
+import { serveRepo } from './../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin, server } = await serveRepo();
+const b = await chromium.launch(); const p = await b.newPage({viewport:{width:1600,height:900}});
+const errs=[]; p.on('console',m=>{if(m.type()==='error')errs.push(m.text())}); p.on('pageerror',e=>errs.push(''+e));
+await p.goto(origin+'/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam');
+await p.waitForFunction('window.__pkr && window.__pkr.isReady');
+await p.evaluate(()=>window.__pkr.seed(7));
+await p.evaluate(()=>window.__pkr.step(9000));
+const pre=await p.evaluate(()=>{const r=window.__pkr.state().race.racers;return{item:r.find(x=>x.id==='pikachu')?.item,sp:r.map(x=>Math.round(x.speed))}});
+await p.screenshot({path:'gauntlet/shots/ri-r2-beam-before.png'});
+await p.keyboard.press('Space');
+await p.evaluate(()=>window.__pkr.step(400));
+await p.screenshot({path:'gauntlet/shots/ri-r2-beam-after.png'});
+const post=await p.evaluate(()=>{const r=window.__pkr.state().race.racers;return{item:r.find(x=>x.id==='pikachu')?.item,sp:r.map(x=>Math.round(x.speed))}});
+console.log('PRE',JSON.stringify(pre)); console.log('POST',JSON.stringify(post)); console.log('ERRS',errs.length,errs.slice(0,2));
+await b.close(); server.close();
