@@ -1,29 +1,26 @@
-# Gauntlet Loop Workbench — Pokémon Racing Game
+# Gauntlet Loop Workbench — Pokémon Racing Game — FINAL
 
-**Goal:** A browser game like Mario Kart 8 gameplay ("Pokémon Racing Game").
-**Bar:** The 4 reference screenshots in `./goal/` — critics compare real rendered screenshots side-by-side against them.
-**Loop rule:** Each piece loops builder → fresh harsh critic until the critic says it WINS against the bar, improvements plateau (2× negligible), or round cap.
+**Goal:** A browser game like Mario Kart 8 gameplay ("Pokémon Racing Game"). Entry: `index.html`.
+**Bar:** The 4 reference screenshots in `./goal/`.
+**Run:** `wf_57d50d7e-e0f` · finished 2026-08-16 02:44 · 45 agents · ~5.1M tokens.
+**Status board:** https://claude.ai/code/artifact/54efa066-4095-4bbb-98f2-b213fb92fde2
+**Code:** https://github.com/anativ/pokemon-race
 
-## Pieces
+## Final verdicts
 
-| Piece | Judged against | Status |
-|---|---|---|
-| shell-and-contracts | flow screens across all refs | ⏳ queued |
-| race-world | sunny grass ref, neon night ref, snow panel | ⏳ queued |
-| racers-items-and-race-rules | rival field + Poké Ball pickups, item-use panel | ⏳ queued |
-| race-hud-and-countdown | HUD corners in both race refs, countdown panel | ⏳ queued |
-| character-and-track-select | character select ref, track selection panel | ⏳ queued |
-| results-podium | podium panel | ⏳ queued |
+| Piece | Rounds | Verdict | Final gap named by the critic |
+|---|---|---|---|
+| shell-and-contracts | 2 (+hot-fix) | **WINS** | uppercase keys ignored by `__pkr.press()` |
+| race-world | 5 | capped (minor) | hero kart mesh reads as seamed quads up close |
+| racers-items-and-race-rules | 5 | capped (minor) | Hyper Beam is a thin ribbon, not an anchored flame cone |
+| race-hud-and-countdown | 4 | **WINS** | minimap chips oversized vs the route ribbon |
+| character-and-track-select | 3 | **WINS** | backdrop dimmer than the reference's lit neon street |
+| results-podium | 5 | capped (minor) | same-family species share a body kit (Charizard ≈ Dragonite recolor) |
 
-## Live round log
+**Smoothing pass (fresh eyes):** full keyboard playthrough clean, zero console errors, choices
+carry end-to-end. Fixed: HUD announcing rivals' items, minimap white-on-white on snow,
+stale confirm flags on back-nav. Flagged for future work: unify the three racer art systems
+(avatars / kart riders / podium figures) — the parametric kart-rider recipe collapses for
+complex species.
 
-Builders and critics append one line per round to [gauntlet/log.md](gauntlet/log.md) as they run —
-watch it with:
-
-```bash
-tail -f "/Users/alonnativ/code/playground/private/Gauntlet-Loop/pokemon-racing/gauntlet/log.md"
-```
-
-Critic screenshots land in `gauntlet/shots/` so you can eyeball what the critic saw.
-
-_This file is updated with final verdicts when the loop finishes. Started 2026-08-14._
+Round-by-round history: [gauntlet/log.md](gauntlet/log.md). Evidence shots: `gauntlet/shots/` (untracked).
