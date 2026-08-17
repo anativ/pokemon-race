@@ -39,4 +39,17 @@ intact, state carries across all seams. Found + fixed: near rivals' mesh karts r
 X-ray-transparent in the fade-in band (`src/race/world.js`). Also noted: minimap chips still
 oversized, pickup-pop ring lands on the kart deck.
 
+## Round 3 (run `wf_f3bad004-ba1`, finished 2026-08-17 · 17 agents · ~2.4M tokens)
+
+| Piece | Rounds | Verdict | Note |
+|---|---|---|---|
+| rider-scale | 1 | **WINS** | all 24 heads normalized to ~27% of kart width |
+| minimap-chips | 1 | **WINS** | 12 chips single-file; ribbon weight still heavier than ref |
+| beam-anchor | 3 | capped | verifier then found + fixed the real bug: renderer flipped cone→burst mid-burn |
+| podium-charmander | 3 | capped | muzzle doesn't break the skull silhouette (same on Blaziken's beak) |
+
+**Verify pass 3:** zero console errors across full flow, 3 tracks, beam stress run and a 40-lap
+long-run; determinism byte-identical; no regressions. Known cosmetic leftovers: Charmander/Blaziken
+muzzle silhouettes, minimap ribbon weight, dry-burst offset on hard bends, Ditto's nubs.
+
 Round-by-round history: [gauntlet/log.md](gauntlet/log.md). Evidence shots: `gauntlet/shots/` (untracked).

@@ -1,34 +1,42 @@
 /**
- * Minimap route geometry - piece: race-hud-and-countdown.
+ * Minimap route geometry - piece: race-hud-and-countdown / minimap-chips.
  *
- * The reference HUD map is not a fat symmetric loop: it is a long *meandering
- * serpentine* ribbon with ~10 bends that snakes across the whole bottom-right
- * corner, so a dozen face chips can be strung along it and still read
- * individually. `tracks.js` only ships a coarse 12-point blob (owned by another
- * piece), so the HUD keeps its own route shapes here and maps lap fraction to
- * them by *arc length* - which also guarantees chips sit centred on the drawn
- * ribbon instead of on a polygon that only approximates it.
+ * The reference HUD map reads as a *circuit*: one thin pale line looping the
+ * corner with small racer markers threaded along it single-file. `tracks.js`
+ * only ships a coarse 12-point blob (owned by another piece), so the HUD keeps
+ * its own route shapes here and maps lap fraction to them by *arc length* -
+ * which guarantees chips sit centred on the drawn ribbon instead of on a
+ * polygon that only approximates it.
+ *
+ * Shape constraint that matters for chips: any two strands of the loop that are
+ * far apart *along* the route must stay far apart *in the plane* too. The old
+ * hand-drawn serpentines folded back on themselves ~14 units apart - narrower
+ * than the ribbon itself - so arc-spaced chips still collided across a hairpin
+ * and piled up two-deep. These loops keep every distant pair of strands >=23
+ * units apart (checked numerically; see `minStrandGap`), i.e. wider than the
+ * ribbon plus a chip, so single-file spacing along the arc is enough.
  */
 
-/* Hand-authored serpentines, in a 0..100 x 0..100 box. Each closes across the
-   bottom, so the two end strands read like the reference's snake tails. */
+/* Wandering circuits in a 0..100 x 0..100 box; index 0 (the start line) sits on
+   the left strand, well clear of the wordmark under the card. */
 const ROUTES = {
   'pallet-town': [
-    [30, 95], [18, 86], [15, 72], [27, 63], [38, 57], [28, 47], [15, 39],
-    [18, 25], [31, 16], [43, 21], [48, 32], [56, 28], [62, 13], [76, 8],
-    [87, 17], [86, 33], [75, 43], [65, 52], [60, 64], [51, 72], [44, 84],
-    [45, 95],
+    [11.0, 69.8], [12.6, 48.2], [25.1, 34.4], [36.9, 30.5], [43.1, 25.1],
+    [49.2, 13.6], [59.6, 5.4], [70.9, 9.9], [77.5, 24.2], [80.3, 39.7],
+    [83.0, 55.0], [83.5, 72.6], [76.7, 87.1], [64.5, 89.7], [54.3, 83.1],
+    [47.4, 79.8], [37.7, 83.8], [22.7, 84.0],
   ],
   'ryme-city': [
-    [33, 96], [21, 89], [14, 76], [24, 65], [36, 60], [27, 50], [13, 43],
-    [15, 28], [28, 17], [42, 19], [48, 31], [58, 32], [64, 19], [77, 10],
-    [88, 20], [87, 36], [77, 46], [67, 54], [62, 67], [53, 75], [46, 86],
-    [48, 96],
+    [10.9, 69.4], [20.3, 51.4], [28.8, 41.1], [30.7, 29.3], [36.5, 17.7],
+    [46.8, 11.6], [59.1, 7.1], [72.0, 11.0], [78.8, 25.3], [83.6, 38.6],
+    [90.5, 52.8], [87.3, 68.6], [74.2, 75.6], [64.4, 79.4], [56.6, 87.2],
+    [45.8, 91.4], [32.6, 91.8], [17.1, 86.7],
   ],
   'mt-coronet': [
-    [26, 95], [15, 84], [20, 70], [34, 65], [45, 57], [35, 47], [22, 41],
-    [27, 27], [41, 19], [54, 24], [59, 36], [69, 30], [80, 17], [90, 27],
-    [86, 42], [73, 50], [64, 60], [70, 74], [62, 88], [48, 94], [38, 96],
+    [9.2, 62.1], [16.0, 44.0], [31.6, 36.9], [40.1, 33.8], [43.7, 23.0],
+    [51.8, 10.2], [64.9, 5.1], [76.8, 13.2], [79.7, 31.0], [76.6, 46.2],
+    [78.6, 57.9], [81.6, 74.0], [74.7, 86.8], [62.2, 87.9], [52.1, 84.1],
+    [43.8, 81.8], [33.4, 81.1], [19.0, 77.0],
   ],
 };
 
@@ -111,38 +119,92 @@ export function pointAtFraction(route, f) {
   return pointAtLength(route, f * route.length);
 }
 
+/** Closest approach, in the plane, between two strands >=30 apart along the arc. */
+export function minStrandGap(route, apart = 30) {
+  const { xs, ys, acc, length } = route;
+  let min = Infinity;
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = i + 1; j < xs.length; j += 1) {
+      const da = Math.abs(acc[j] - acc[i]);
+      if (Math.min(da, length - da) < apart) continue;
+      const d = Math.hypot(xs[i] - xs[j], ys[i] - ys[j]);
+      if (d < min) min = d;
+    }
+  }
+  return min;
+}
+
 /**
- * Spread chips that landed on top of each other.
+ * Thread the chips single-file along the route.
  *
- * Input: `[{ key, s }]` arc-length positions on the closed route. Overlapping
- * chips are pushed apart along the path (circularly) until every neighbour pair
- * is at least `gap` apart, so all twelve faces stay individually legible even
- * on the start grid where the whole field shares one metre of track.
+ * Input: `[{ id, s, r }]` - arc-length position plus the chip's outer radius.
+ * Chips are pushed apart *along the path* (circularly) until neighbouring chips
+ * clear each other, so on the start grid - where the whole field shares one
+ * metre of track - the twelve markers read as a queue of beads on the line
+ * rather than a heap. Two passes:
+ *   1. arc-length: every neighbour pair at least (rA + rB) * pad apart;
+ *   2. plane: if `at` is given, near neighbours whose *euclidean* distance is
+ *      still short (the inside of a tight bend) get extra arc separation.
+ * Centres are never nudged sideways, so every chip stays on the drawn stroke.
  */
-export function spreadAlong(items, length, gap, passes = 60) {
+export function spreadAlong(items, length, opts = {}, passes = 80) {
   const n = items.length;
   if (!n) return items;
-  const g = Math.min(gap, (length * 0.94) / n);
+  const { pad = 1.06, at = null } = typeof opts === 'number' ? { pad: 1 } : opts;
   const order = items
-    .map((it, i) => ({ ...it, i, s: ((it.s % length) + length) % length }))
+    .map((it, i) => ({ ...it, i, s: ((it.s % length) + length) % length, r: it.r || 0 }))
     .sort((a, b) => a.s - b.s || a.i - b.i);
-  for (let pass = 0; pass < passes; pass++) {
+  // total room the field needs; if the loop is too short, shrink gaps evenly
+  // rather than letting the relaxation fight itself forever.
+  let want = 0;
+  for (let i = 0; i < n; i++) want += (order[i].r + order[(i + 1) % n].r) * pad;
+  const squeeze = want > length * 0.96 ? (length * 0.96) / want : 1;
+  const gapOf = (a, b) => (a.r + b.r) * pad * squeeze;
+
+  const arcPass = () => {
     let moved = 0;
     for (let i = 0; i < n; i++) {
       const a = order[i];
       const b = order[(i + 1) % n];
+      if (a === b) break;
       let delta = b.s - a.s;
       if (i === n - 1) delta += length;
-      const need = g - delta;
+      const need = gapOf(a, b) - delta;
       if (need > 0.001) {
-        const push = need / 2;
-        a.s -= push;
-        b.s += push;
+        a.s -= need / 2;
+        b.s += need / 2;
         moved++;
       }
     }
-    if (!moved) break;
+    return moved;
+  };
+
+  for (let pass = 0; pass < passes; pass++) if (!arcPass()) break;
+
+  if (at && n > 2 && squeeze === 1) {
+    for (let pass = 0; pass < passes; pass++) {
+      let moved = 0;
+      for (let i = 0; i < n; i++) {
+        for (const k of [1, 2]) {
+          const a = order[i];
+          const b = order[(i + k) % n];
+          if (a === b) continue;
+          const pa = at(a.s);
+          const pb = at(b.s);
+          const need = (a.r + b.r) * squeeze - Math.hypot(pa[0] - pb[0], pa[1] - pb[1]);
+          if (need > 0.02) {
+            const push = Math.min(1.5, need * 0.6);
+            a.s -= push;
+            b.s += push;
+            moved++;
+          }
+        }
+      }
+      arcPass();
+      if (!moved) break;
+    }
   }
+
   const out = new Array(n);
   for (const it of order) out[it.i] = { ...it, s: ((it.s % length) + length) % length };
   return out;

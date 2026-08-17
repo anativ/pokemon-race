@@ -23,16 +23,19 @@ export const ITEMS = Object.freeze([
     boost: 1, weight: 'mid' },
   { id: 'thunderbolt', name: 'Thunderbolt', kind: 'field', color: '#ffd63b',
     spin: 0.7, weight: 'rare' },
-  // reach is deliberately short: the flame has to END on a kart the player can
-  // actually see burn, not mow down rivals somewhere off past the horizon.
-  // ONE victim, always: the flame terminates on the kart it burns, so the
-  // sim must never damage a second rival the plume is not drawn on.
-  // `knock` is deliberately tiny and always aimed at the ROAD CENTRE (see
-  // applyHit's `dir`): the old outward shove drove the burning kart into the
-  // barrier, where the renderer stopped drawing it - which is exactly what made
-  // the flame look like it ended on empty asphalt.
+  // ONE victim, always: the flame terminates on the kart it burns, so the sim
+  // must never damage a second rival the plume is not drawn on.
+  // `reach` is mid-range, not short: the victim has to be far enough up the road
+  // to be DRAWN clear of the firer's own rider (a kart a kart-length ahead
+  // projects straight behind the hero's head, where a cone would be sliced in two
+  // by the rider cut-out) and near enough to still be a chassis rather than a
+  // speck for the flame to close over. See BEAM_MIN_GAP / BEAM_SWEET.
+  // `knock` is deliberately tiny: it nudges the burning kart a little further off
+  // our own line so it stays drawn clear of our rider for the whole burn, and is
+  // turned back inwards near the barrier, where the renderer stops drawing it at
+  // all (a flame landing on a kart nobody can see reads as a flame hitting road).
   { id: 'hyper-beam', name: 'Hyper Beam', kind: 'beam', color: '#ffe98a',
-    reach: 250, sweep: 2600, spin: 1.35, maxHits: 1, knock: 0.16, weight: 'rare' },
+    reach: 330, sweep: 3400, spin: 1.35, maxHits: 1, knock: 0.28, weight: 'rare' },
 ]);
 
 const BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
@@ -232,7 +235,21 @@ export function fireItem(race, r) {
       // already licking all the way to the victim on the very first frame, so
       // the fire-frame reads as a cone landing ON a kart instead of a stub.
       front: victim ? Math.max(150, gap0) : 150,
-      life: 0, ttl: 1.35, hits: [],
+      life: 0,
+      // A shot with nobody in front is SPENT, and it says so: it burns for half
+      // as long and the effects layer draws it as a short muzzle burst off the
+      // nose instead of a plume down the road. Kept dry for its whole life (see
+      // `dry` below) so it can never mutate into a full cone half a beat after
+      // the player watched it fizzle - and still alight 400 ms in, which is the
+      // frame the fizzle is judged on.
+      // The live burn is long enough to read as a sustained blast, and short
+      // enough that it ENDS before the kart whose speed it just halved has slid
+      // back alongside us: a plume whose victim is level with the hero has
+      // nothing up the road to terminate on, and stretching it sideways is
+      // exactly what read as a frame-crossing lance.
+      ttl: victim ? 0.92 : 0.58,
+      dry: !victim,
+      hits: [],
       maxHits: item.maxHits || 1,
       // locked at fire time: the flame is drawn ending on THIS kart and no
       // other kart is ever damaged by it.
@@ -260,21 +277,45 @@ export function fireItem(race, r) {
  * screen (the renderer shoulders or drops rivals that intersect it), so the
  * flame could never be seen ENDING on it.
  *
- * Deliberately generous: burning a kart halves its speed, so we close on the
- * victim hard for the rest of the 1.35 s burn. Locking onto someone barely a
- * kart length ahead means that by the 400 ms frame they are alongside us and
- * the cone has nothing up the road to terminate on.
+ * Burning a kart halves its speed, so we close on the victim for the rest of the
+ * burn: locking onto someone barely a kart length ahead means that by the 400 ms
+ * frame they are alongside us and the cone has nothing up the road to end on.
+ * Not TOO generous either - out past the sweet band the victim is a speck, and a
+ * cone drawn all the way to it is the frame-crossing lance we do not want.
  */
-const BEAM_MIN_GAP = 115;
+const BEAM_MIN_GAP = 150;
 /**
- * Lane half-window the flame can be aimed across. It spans the WHOLE road:
- * a rival two lanes over is still a kart on screen for the cone to end on,
- * and refusing to aim at them is what left the beam burning bare tarmac on
- * tracks where nobody happened to be in our own lane.
+ * Ideal gap for the shot, in world units: far enough that the victim is drawn
+ * clear of the hero's own kart, near enough that it is still a chassis rather
+ * than a speck for the far cap to close over. Scoring below pulls the lock
+ * towards this band instead of simply towards the nearest kart.
  */
-const BEAM_LANE = 1.30;
-/** How far past the nominal reach the flame will stretch to find a kart. */
-const BEAM_FAR = 3.4;
+const BEAM_SWEET = 215;
+/**
+ * Lane offset (in lanes) that fully earns the "drawn clear" bonus below. On a
+ * chase camera the hero's rider stands in the middle of the road ahead: a victim
+ * in OUR lane projects directly behind their head, where no cone can be drawn
+ * without being sliced in two by the character. Half a lane over is already ~180
+ * screen pixels to the side of them, which is exactly where the plume reads.
+ */
+const BEAM_OFFSET = 0.5;
+/**
+ * Lane half-window the flame can be aimed across. Wide enough that a rival a
+ * whole lane over is still fair game (refusing those left the beam burning bare
+ * tarmac on tracks where nobody sat in our own lane), but not the full width of
+ * the road: a victim right out at the barrier is drawn under the minimap column,
+ * where the effects layer has to clip the flame and it cannot be seen landing.
+ */
+const BEAM_LANE = 1.05;
+/**
+ * How far past the nominal reach the flame will stretch to find a kart. Kept
+ * tight on purpose: past this the rival is a speck near the horizon (or a lap
+ * behind us, which `forwardGap` wraps into a huge "gap ahead"), and a cone drawn
+ * all the way out to them is the full-length plume into empty road that a dry
+ * shot must NOT look like. Out here the shot simply has no victim, and the
+ * effects layer draws it as the short muzzle burst it is.
+ */
+const BEAM_FAR = 1.4;
 
 /** Forward (wrapping) gap from `a` to `b` along the lap, signed to +-half lap. */
 export function forwardGap(race, aDist, bDist) {
@@ -301,14 +342,27 @@ export function pickBeamTarget(race, from, reach) {
     if (o === from || o.id === from.id || o.finished) continue;
     const gap = forwardGap(race, from.dist, o.dist);
     if (gap < BEAM_MIN_GAP) continue;
-    const off = Math.abs(o.lane - from.lane);
+    // Signed, because the two sides are NOT equivalent on screen: the whole
+    // right-hand column of the frame belongs to the HUD (minimap, standings,
+    // position badge), and the flame is clipped out of it - so a victim that
+    // drifts over there gets a plume that stops dead in mid-air short of the
+    // chassis. A rival on the camera-LEFT half is always in clear air, which is
+    // where the cone can actually be drawn landing on it.
+    const side = o.lane - from.lane;
+    const off = Math.abs(side);
     if (gap <= reach && off <= BEAM_LANE) {
-      // DEAD AHEAD beats merely near. The flame has to read as pointing INTO
-      // the kart it burns, so a rival square in our lane wins over one that is
-      // marginally closer but half a road away (which is what used to send the
-      // cone diagonally off the racing line onto empty asphalt). Distance is
-      // only the tie-breaker.
-      const score = off + (gap / Math.max(1, reach)) * 0.55;
+      // Lane offset DOMINATES the gap, and it is a bonus rather than a penalty:
+      // the one thing that decides whether the flame can be drawn is whether the
+      // victim sits beside the firer's rider instead of directly behind their
+      // head. The gap term only breaks ties, pulling the lock towards the sweet
+      // band - near enough to be a chassis, far enough to be clear of our nose.
+      // A HUGE offset is no better than a healthy one, and is often worse: the
+      // victim ends up out at the frame edge under the minimap column, where the
+      // flame is clipped and cannot be seen landing on it.
+      const score = Math.abs(gap - BEAM_SWEET) / Math.max(1, reach) * 0.6
+        - Math.max(0, Math.min(-side, BEAM_OFFSET)) / BEAM_OFFSET
+        - Math.min(off, BEAM_OFFSET) / BEAM_OFFSET * 0.25
+        + Math.max(0, off - BEAM_OFFSET * 1.5) * 1.2;
       if (score < bestScore) { bestScore = score; best = o; }
     } else if (gap <= reach * BEAM_FAR && gap < farGap) {
       // nothing in the nominal window: stretch to the nearest kart in front so
@@ -333,7 +387,10 @@ export function applyHit(race, target, item, from, opts = {}) {
   // if the field is stationary (e.g. an item fired on the grid).
   const shove = opts.shove == null ? 0.14 : opts.shove;
   target.lane = Math.max(-1.02, Math.min(1.02, target.lane + target.spinDir * shove));
-  target.speed *= 0.55;
+  // `opts.slow` softens the speed loss. A Hyper Beam uses it: the victim being
+  // dragged backwards into the firer's own bumper is what ends a burn with the
+  // plume drawn onto a kart that is no longer up the road at all.
+  target.speed *= opts.slow == null ? 0.55 : opts.slow;
   target.boost = 0;
   target.boostT = 0;
   target.hitFlash = 1;
@@ -403,7 +460,7 @@ export function updateOrdnance(race, dt) {
     // beam still has nobody. Whatever the flame is drawn on is what burns.
     let victim = b.target ? race.racers.find((r) => r.id === b.target) : null;
     if (victim && victim.finished) victim = null;
-    if (!victim && owner && b.hits.length < (b.maxHits || 1)) {
+    if (!victim && !b.dry && owner && b.hits.length < (b.maxHits || 1)) {
       victim = pickBeamTarget(race, owner, b.reach);
       b.target = victim ? victim.id : null;
     }
@@ -414,10 +471,14 @@ export function updateOrdnance(race, dt) {
       b.gap = gap;
       if (!b.hits.includes(victim.id) && gap <= b.front + 6 && gap <= b.reach) {
         b.hits.push(victim.id);
-        // always slew INWARDS, towards the middle of the road: the burning kart
-        // has to stay on camera under the flame for the whole burn.
-        b.knockDir = victim.lane >= 0 ? -1 : 1;
-        applyHit(race, victim, item, owner, { dir: b.knockDir, shove: 0.10 });
+        // Slew the burning kart a little further OFF the firer's own line, so it
+        // stays drawn clear of the firer's rider (in a chase view a victim slewed
+        // back into our lane ends up directly behind the hero's head, where the
+        // flame cannot be drawn landing on it) - unless it is already near the
+        // barrier, where the renderer would stop drawing it altogether.
+        const away = Math.sign(victim.lane - (owner ? owner.lane : 0)) || 1;
+        b.knockDir = Math.abs(victim.lane) > 0.60 ? -Math.sign(victim.lane) : away;
+        applyHit(race, victim, item, owner, { dir: b.knockDir, shove: 0.10, slow: 0.78 });
       }
       // The burnt kart slews OFF the racing line while it burns - spread over
       // KNOCK_T rather than teleported, so the frame the flame lands on still
@@ -426,7 +487,7 @@ export function updateOrdnance(race, dt) {
       // vanished two frames after the hit is what made the flame look like it
       // terminated on nobody.
       // BUDGETED: the slew is spent over KNOCK_T and then stops. Left running
-      // for the whole 1.35 s burn it walks the victim right across the road and
+      // for the whole burn it walks the victim right across the road and
       // out of frame, which is the bug that made the flame look unattached.
       if (b.hits.includes(victim.id) && item.knock && (b.knocked || 0) < item.knock) {
         const step = Math.min((item.knock * dt) / KNOCK_T, item.knock - (b.knocked || 0));

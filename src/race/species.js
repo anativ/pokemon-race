@@ -7,10 +7,13 @@
  *    The silhouette is not invented here: it is the canonical per-species art
  *    from src/core/avatars.js (CONTRACTS 4b), compiled once per racer into
  *    Path2D ops and rasterised into a small offscreen figure that rider.js
- *    billboards into the kart's seat, cropped at the cockpit rim. Head, ears,
- *    horns, fins, snout, shell, wings and tail therefore come out exactly as
- *    the HUD portrait draws them - no per-species recipe to fall out of sync,
- *    and no way for a roster entry to degrade into a recoloured bear.
+ *    billboards onto the driver's shoulders, pinned by the art's own jaw line.
+ *    Head, ears, horns, fins, snout, shell, wings and tail therefore come out
+ *    exactly as the HUD portrait draws them - no per-species recipe to fall out
+ *    of sync, and no way for a roster entry to degrade into a recoloured bear.
+ *    `headWidth()` measures the head blob so the rider can scale every species
+ *    to the same fraction of the kart instead of the same fraction of its own
+ *    art frame.
  *
  * 2. The small cosmetic recipe below, which now only feeds *kart* dressing
  *    (livery / side emblem / cap colour) and the fur tone used for the arms.
@@ -246,15 +249,15 @@ export function compileArt(markup) {
  * The rider IS the portrait. Every creature in src/core/avatars.js is already a
  * seated-friendly chibi: one silhouette carrying head, ears/horns/fins, snout,
  * shell, wings and tail, drawn with the same flat fills + dark ink the HUD uses.
- * The rider renders *that whole figure* into the seat, cropped at the cockpit
- * rim, so a Squirtle keeps its shell rim and beak, a Garchomp keeps its head
- * fin and jaw, and no species can decay into a recoloured template. Only the
- * arms are invented, because a portrait has none and a driver needs both hands
- * on the wheel; they are lit geometry hung off the figure's own shoulder line.
+ * The rider stamps *that figure* on top of a lit torso, so a Squirtle keeps its
+ * shell rim and beak, a Garchomp keeps its head fin and jaw, and no species can
+ * decay into a recoloured template. Only the shoulders, chest and arms are
+ * invented, because a chibi portrait has none and a driver needs shoulders and
+ * both hands on the wheel; they are lit geometry sized off the head.
  *
  * `rig` supplies the per-species numbers the crop needs:
- *   y, r    the face circle of the art frame - sets the figure's scale, so
- *           every rider's head reads at the same size next to its HUD chip
+ *   y, r    the face circle of the art frame - sets the jaw line the head is
+ *           pinned to, and classifies which ops are head and which are body
  *   build   'slim' | 'round' | 'heavy' - arm thickness / shoulder drop
  *   hand    'paw' | 'claw' | 'fist' | 'fin' | 'hand'
  *   arms    2 (or 4, for Machamp)
@@ -310,12 +313,35 @@ function bodyHalfWidth(ops, rig) {
   return (bw || 64) / 2;
 }
 
+/**
+ * Width of the *head blob* - the op the eye reads as the creature's head - in
+ * art units. In this chibi grammar the head and the trunk are usually one
+ * silhouette (`pear`, `blob`, `torso`), so the measure is the widest centred op
+ * that straddles the face circle; ears, horns, tails, wings and feet all sit
+ * too far off the centre line or too far below the jaw to count. The rider
+ * scales itself off this number instead of off the face *radius*, because it is
+ * the number a viewer (and a critic with a ruler) actually measures against the
+ * kart's width.
+ */
+function headWidth(ops, rig) {
+  let w = 0;
+  for (const op of ops) {
+    const b = op.box;
+    if (!b || !b.w) continue;
+    if (Math.abs(b.cx - 50) > 14) continue;        // a tail, a wing, an ear
+    if (b.y0 > rig.y + rig.r * 1.3) continue;      // feet / legs
+    if (b.y1 < rig.y - rig.r * 1.3) continue;      // a crest tip way overhead
+    if (b.w > w) w = b.w;
+  }
+  return w || rig.r * 2.8;
+}
+
 const ART = new Map();
 
 /**
  * Compiled bespoke silhouette for a racer, in the canonical 0..100 art frame
  * (ground line y = 92, head near y = 50). Cached per id+palette.
- * @returns {{ops:Array, rig:object, bw:number, key:string, bespoke:boolean}}
+ * @returns {{ops:Array, rig:object, bw:number, hw:number, key:string, bespoke:boolean}}
  */
 export function riderArt(racer) {
   const id = (racer && racer.id) || 'pikachu';
@@ -329,7 +355,13 @@ export function riderArt(racer) {
     ops = [];
   }
   const rig = rigOf(id);
-  a = { ops, rig, key, bw: bodyHalfWidth(ops, rig), bespoke: hasSpecies(id) && ops.length > 0 };
+  a = {
+    ops, rig, key,
+    bw: bodyHalfWidth(ops, rig),
+    hw: headWidth(ops, rig),
+    chin: rig.y + rig.r,
+    bespoke: hasSpecies(id) && ops.length > 0,
+  };
   ART.set(key, a);
   return a;
 }
@@ -345,6 +377,8 @@ export function riderArt(racer) {
 
 /** Art-frame y where the figure is cropped: just above the portrait's feet. */
 export const ART_CUT = 84;
+/** Ink width multiplier for the rider (the HUD keeps the portrait's own). */
+const INK = 0.70;
 const ART_PAD = 5;
 const ART_W = 100 + ART_PAD * 2;
 const ART_H = ART_CUT + ART_PAD;
@@ -380,17 +414,33 @@ export function riderSprite(racer, px) {
     for (const op of art.ops) {
       if (op.alpha !== 1) { c.save(); c.globalAlpha = op.alpha; }
       if (op.fill) { c.fillStyle = op.fill; c.fill(op.path); }
-      if (op.stroke) { c.strokeStyle = op.stroke; c.lineWidth = op.lw; c.stroke(op.path); }
+      // The portrait's ink is sized for an 84 px HUD chip; on a rider that is a
+      // third of that it turns into a hard black cartoon outline sitting next to
+      // faceted bodywork. Thin it (and let the key-light ramp below wash over
+      // it) so the head reads as a lit object with an edge, not a sticker.
+      if (op.stroke) { c.strokeStyle = op.stroke; c.lineWidth = op.lw * INK; c.stroke(op.path); }
       if (op.alpha !== 1) c.restore();
     }
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalCompositeOperation = 'source-atop';
-    const g = c.createLinearGradient(0, 0, cv.width * 0.62, cv.height);
-    g.addColorStop(0, 'rgba(255,255,255,0.30)');
-    g.addColorStop(0.34, 'rgba(255,255,255,0.05)');
-    g.addColorStop(0.66, 'rgba(10,16,34,0.05)');
-    g.addColorStop(1, 'rgba(8,12,28,0.36)');
+    // Same key light as the bodywork: high and front-left of the chase camera
+    // (see LX/LY/LZ in kart3d.js), so the highlight lands up-left and the
+    // terminator rolls off to the low right. Strong enough that the head is
+    // visibly the same lit material as the shell it is sitting in.
+    const g = c.createLinearGradient(0, 0, cv.width * 0.58, cv.height * 1.02);
+    g.addColorStop(0, 'rgba(255,251,236,0.44)');
+    g.addColorStop(0.30, 'rgba(255,253,244,0.14)');
+    g.addColorStop(0.56, 'rgba(12,18,40,0.08)');
+    g.addColorStop(0.86, 'rgba(10,15,34,0.22)');
+    g.addColorStop(1, 'rgba(8,12,30,0.40)');
     c.fillStyle = g;
+    c.fillRect(0, 0, cv.width, cv.height);
+    // specular bloom on the brow, where a round head catches the key
+    const hi = c.createRadialGradient(
+      cv.width * 0.34, cv.height * 0.24, 0, cv.width * 0.34, cv.height * 0.24, cv.width * 0.46);
+    hi.addColorStop(0, 'rgba(255,255,250,0.20)');
+    hi.addColorStop(1, 'rgba(255,255,250,0)');
+    c.fillStyle = hi;
     c.fillRect(0, 0, cv.width, cv.height);
     c.globalCompositeOperation = 'source-over';
   } catch (e) {

@@ -1,13 +1,14 @@
 /**
  * Route-shaped minimap for the race HUD.
  *
- * The reference floats a long pale route ribbon - a meandering serpentine with
- * ~10 bends filling the whole bottom-right corner - carrying identifiable
- * per-racer icon chips (a Pikachu head for the player, creature faces for the
- * rivals) sitting *centred on* the ribbon, not anonymous colour balls hanging
- * off its edge. So the geometry comes from `route.js` (arc-length parameterised,
- * so a chip is always on the drawn stroke), chips are sized to the ribbon, and
- * a spreading pass keeps all twelve legible even on the start grid.
+ * The reference floats a pale *circuit* line in the corner with small racer
+ * markers threaded along it single-file: identifiable per-racer icon chips (a
+ * Pikachu head for the player, creature faces for the rivals) about the width of
+ * the line, sitting *centred on* it - not fat balls stacked two-deep beside it.
+ * So the geometry comes from `route.js` (arc-length parameterised, so a chip is
+ * always on the drawn stroke), chip discs are sized off `RIBBON.edge`, and the
+ * spreading pass in `route.js` buys separation along the arc only - centres are
+ * never nudged sideways off the ribbon.
  *
  * Chips are built once (`minimapSvg`) and only re-positioned per frame
  * (`updateMinimap`), so 12 full creature silhouettes cost nothing at runtime.
@@ -16,10 +17,18 @@ import { racerOr } from '../data/roster.js';
 import { creatureMarkup } from '../core/avatars.js';
 import { buildRoute, pointAtLength, spreadAlong } from './route.js';
 
-/* Ribbon + chip metrics, in the route's 0..100 space. */
-const RIBBON = { edge: 11.4, fill: 9.5, gloss: 4.2 };
-const CHIP = { rival: 4.15, player: 4.95 };
-export const VIEWBOX = { x: 4, y: -1, w: 95, h: 106 };
+/* Ribbon + chip metrics, in the route's 0..100 space.
+   `edge` is the pale ribbon's stroke width - the reference's "thin white circuit
+   line" - and every chip is sized against it: a rival marker's outer disc is
+   ~0.8x that width and the player's is ~1.0x, so markers hug the line instead of
+   swallowing it. RIM/HALO are the white/gold ring thicknesses added on top. */
+const RIBBON = { edge: 10.6, fill: 8.8, gloss: 3.4 };
+const CHIP = { rival: 3.35, player: 3.65, rim: 0.85, halo: 1.25 };
+/** Outer radius actually painted for a chip (what de-overlap must respect). */
+export function chipRadius(isPlayer) {
+  return isPlayer ? CHIP.player + CHIP.rim + CHIP.halo : CHIP.rival + CHIP.rim;
+}
+export const VIEWBOX = { x: 2, y: 0, w: 96, h: 100 };
 
 const routeCache = new Map();
 export function routeFor(track) {
@@ -103,38 +112,46 @@ function chipMarkup(def, r, isPlayer) {
   const face = `<svg x="${fo.toFixed(2)}" y="${(fo + r * 0.06).toFixed(2)}" width="${fw.toFixed(2)}" height="${fw.toFixed(2)}"
       viewBox="20 26 60 60">${creatureMarkup(def)}</svg>`;
   if (isPlayer) {
-    return `<circle r="${(r + 1.7).toFixed(2)}" fill="#ffd63b"/>
-      <circle r="${(r + 0.85).toFixed(2)}" fill="#ffffff"/>
+    return `<circle r="${(r + CHIP.rim + CHIP.halo).toFixed(2)}" fill="#ffd63b"/>
+      <circle r="${(r + CHIP.rim).toFixed(2)}" fill="#ffffff"/>
       <circle r="${r.toFixed(2)}" fill="${k.fill}"/>
       ${face}
-      <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".6" opacity=".7"/>
-      <circle r="${(r + 1.7).toFixed(2)}" fill="none" stroke="#8a5f05" stroke-width=".8" opacity=".85"/>`;
+      <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".5" opacity=".7"/>
+      <circle r="${(r + CHIP.rim + CHIP.halo).toFixed(2)}" fill="none" stroke="#8a5f05" stroke-width=".7" opacity=".85"/>`;
   }
-  return `<circle r="${(r + 1).toFixed(2)}" fill="#ffffff"/>
+  return `<circle r="${(r + CHIP.rim).toFixed(2)}" fill="#ffffff"/>
     <circle r="${r.toFixed(2)}" fill="${k.fill}"/>
     ${face}
-    <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".6" opacity=".65"/>
-    <circle r="${(r + 1).toFixed(2)}" fill="none" stroke="rgba(28,38,62,.5)" stroke-width=".7"/>`;
+    <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".5" opacity=".6"/>
+    <circle r="${(r + CHIP.rim).toFixed(2)}" fill="none" stroke="rgba(28,38,62,.55)" stroke-width=".6"/>`;
 }
 
 /**
  * Chip placement for the whole field: lap fraction -> arc length on the drawn
- * ribbon, then a circular spreading pass so overlapping racers stay readable.
- * Player is placed last in the DOM so its bigger chip paints on top.
+ * ribbon, then the arc-length de-overlap pass so a bunched field (start grid)
+ * queues single-file instead of knotting. Player is placed last in the DOM so
+ * its slightly bigger gold-ringed chip paints on top.
  */
 export function chipLayout(track, race) {
   const route = routeFor(track);
   const L = route.length;
   const len = track.length || 1;
-  const items = race.racers.map((r) => ({ id: r.id, s: fracOf(r, len) * L, lane: r.lane || 0, isPlayer: !!r.isPlayer }));
-  const gap = (CHIP.rival + 1) * 2 * 1.06;
-  const spread = spreadAlong(items, L, gap);
+  const items = race.racers.map((r) => ({
+    id: r.id,
+    s: fracOf(r, len) * L,
+    r: chipRadius(!!r.isPlayer),
+    isPlayer: !!r.isPlayer,
+  }));
+  const spread = spreadAlong(items, L, {
+    pad: 1.09,
+    at: (s) => pointAtLength(route, s),
+  });
   const out = new Map();
   for (const it of spread) {
-    const [x, y, tx, ty] = pointAtLength(route, it.s);
-    // a whisper of lane offset - chips must stay centred on the ribbon.
-    const off = Math.max(-1, Math.min(1, it.lane / 1.6)) * 0.9;
-    out.set(it.id, [x - ty * off, y + tx * off]);
+    // centre lands exactly on the drawn stroke - no lane offset, no drift off
+    // the ribbon; separation is bought along the arc instead.
+    const [x, y] = pointAtLength(route, it.s);
+    out.set(it.id, [x, y]);
   }
   return { route, pos: out };
 }
@@ -142,8 +159,8 @@ export function chipLayout(track, race) {
 /* ------------------------------------------------------------------ render */
 
 /**
- * Full minimap svg: serpentine route ribbon + start line + one icon chip per
- * racer, all inside the corner card.
+ * Full minimap svg: circuit ribbon + start line + one icon chip per racer,
+ * all inside the corner card.
  * @param {object} track  data/tracks.js entry
  * @param {object|null} race  live race state
  * @param {number} width  px
@@ -171,14 +188,14 @@ export function minimapSvg(track, race, width = 300) {
     <!-- Dark casing under the ribbon. Without it the pale grey edge below
          vanishes against Mt Coronet's snow field, where the whole route reads
          as white-on-white; this keeps the map legible on every track theme. -->
-    <path d="${d}" fill="none" stroke="rgba(20,28,46,.42)" stroke-width="${RIBBON.edge + 3.4}" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${d}" fill="none" stroke="#5d6b83" stroke-width="${RIBBON.edge + 1.1}" stroke-linejoin="round" stroke-linecap="round" opacity=".75"/>
+    <path d="${d}" fill="none" stroke="rgba(20,28,46,.42)" stroke-width="${RIBBON.edge + 2.9}" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${d}" fill="none" stroke="#5d6b83" stroke-width="${RIBBON.edge + 1.0}" stroke-linejoin="round" stroke-linecap="round" opacity=".75"/>
     <path d="${d}" fill="none" stroke="#b3bdcd" stroke-width="${RIBBON.edge}" stroke-linejoin="round" stroke-linecap="round"/>
     <path d="${d}" fill="none" stroke="#eef2f8" stroke-width="${RIBBON.fill}" stroke-linejoin="round" stroke-linecap="round"/>
     <path d="${d}" fill="none" stroke="#ffffff" stroke-width="${RIBBON.gloss}" stroke-linejoin="round" stroke-linecap="round" opacity=".5"/>
     <g transform="translate(${sx.toFixed(2)},${sy.toFixed(2)}) rotate(${ang.toFixed(1)})">
-      <rect x="-4.6" y="-2.2" width="9.2" height="4.4" rx=".9" fill="#fff" stroke="#5b6779" stroke-width=".8"/>
-      <path d="M-4.6 -2.2h2.3v1.47h2.3v1.46h2.3v1.47h-2.3v-1.47h-2.3v1.47h-2.3z" fill="#59677c" opacity=".85"/>
+      <rect x="-4.2" y="-2" width="8.4" height="4" rx=".8" fill="#fff" stroke="#5b6779" stroke-width=".7"/>
+      <path d="M-4.2 -2h2.1v1.33h2.1v1.34h2.1v1.33h-2.1v-1.33h-2.1v1.33h-2.1z" fill="#59677c" opacity=".85"/>
     </g>
     <g class="mm-chips" data-chips>${chips.join('')}</g>
   </svg>`;

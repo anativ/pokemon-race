@@ -4,18 +4,19 @@
  * The Pokemon sitting in the kart's seat well is the species itself, not a
  * recoloured template:
  *
- *   - the whole driver - head, ears/horns/fins, snout, shell, wings, tail - is
- *     the creature's own portrait art from src/core/avatars.js, rasterised once
- *     per size bucket and billboarded into the kart's seat plane, cropped at the
- *     cockpit rim. Scale is taken from that species' face circle, so the rider
- *     and the HUD portrait beside it read at the same size and as the same
- *     creature, and a Squirtle keeps its shell rim while a Garchomp keeps its
- *     head fin;
- *   - the arms are the only invented part, because a portrait has none: swept
- *     limbs in kart-local space hung off the figure's own shoulder line and
- *     closed on the wheel rim, pushed through the same projector and key light
- *     as the bodywork (src/race/kart3d.js), with an inverted-hull ink pass so
- *     they keep the portrait's dark outline;
+ *   - the head - and everything the species hangs off it: ears, horns, fins,
+ *     crest, wings, tail - is the creature's own portrait art from
+ *     src/core/avatars.js, rasterised once per size bucket, lit by the kart's
+ *     key light and billboarded above the shoulders. It is scaled off the art's
+ *     head width, so every species' head reads at the same ~27% of kart width
+ *     the reference does, and a Squirtle still keeps its shell rim while a
+ *     Garchomp keeps its head fin;
+ *   - shoulders, chest and arms are the invented part, because a chibi portrait
+ *     has neither and a driver needs shoulders to stop reading as a bobblehead:
+ *     a lofted torso and swept limbs in kart-local space, closing on the wheel
+ *     rim, pushed through the same projector and key light as the bodywork
+ *     (src/race/kart3d.js), with an inverted-hull ink pass in a colour drawn
+ *     from the creature's own skin;
  *   - roster ids with no bespoke art fall back to the parametric driver below.
  *
  * Flat details (steering wheel, tail, shell) are drawn inside *kart-local
@@ -42,9 +43,21 @@ export const HEAD_R = 0.30;
  * Returns false (and installs nothing) if the plane is degenerate.
  */
 export function plane(c, frame, z) {
-  const o = frame.p(0, 0, z);
-  const px = frame.p(1, 0, z);
-  const py = frame.p(0, 1, z);
+  return planeAt(c, frame, z, 0);
+}
+
+/**
+ * Same plane, but with its affine basis sampled *at height `y0`* instead of at
+ * the road. The projection is perspective, so a basis taken at y = 0 drifts the
+ * further up the plane you draw - which is exactly where the driver's head is,
+ * and why a head anchored to the cockpit centreline used to slide off the shell
+ * mid-corner. Sampling at the head's own height removes the extrapolation:
+ * plane coordinates are then measured from y0 (draw the head at y - y0).
+ */
+export function planeAt(c, frame, z, y0) {
+  const o = frame.p(0, y0, z);
+  const px = frame.p(1, y0, z);
+  const py = frame.p(0, y0 + 1, z);
   const ex = px.x - o.x; const exy = px.y - o.y;
   const ey = py.x - o.x; const eyy = py.y - o.y;
   if (!isFinite(ex) || Math.abs(ex * eyy - ey * exy) < 1e-4) return false;
@@ -454,11 +467,16 @@ function limb(out, path, rad, col, n, lift) {
   loft(out, rings, col, { cap: col, lift });
 }
 
-/** Same faces, pushed out from the rider's core - an ink pass for the body. */
-function swell(faces, k) {
+/**
+ * Same faces, pushed out from the rider's core - an ink pass for the body.
+ * `col` is the ink: a *coloured* dark drawn from the creature's own skin reads
+ * as a contact edge next to faceted bodywork, where flat black reads as a
+ * sticker pasted on top of it.
+ */
+function swell(faces, k, col = '#1b1230') {
   const PY = 1.02; const PZ = -0.24;
   return faces.map((f) => ({
-    col: '#1b1230', two: true, flat: 0, lift: f.lift != null ? f.lift : 0,
+    col, two: true, flat: 0, lift: f.lift != null ? f.lift : 0,
     pts: f.pts.map((p) => [p[0] * k, PY + (p[1] - PY) * k, PZ + (p[2] - PZ) * k]),
   }));
 }
@@ -574,7 +592,7 @@ function buildArms(rig, o) {
   const out = [];
   const { skin, glove, grip, detail } = o;
   const n = detail ? 8 : 5;
-  const thick = rig.build === 'heavy' ? 0.072 : rig.build === 'slim' ? 0.050 : 0.060;
+  const thick = rig.build === 'heavy' ? 0.061 : rig.build === 'slim' ? 0.043 : 0.051;
   const pairs = rig.arms === 4
     ? [[o.sx, o.sy, thick], [o.sx * 0.92, o.sy - 0.15, thick * 0.84]]
     : [[o.sx, o.sy, thick]];
@@ -586,10 +604,13 @@ function buildArms(rig, o) {
       // the wheel had to move to stay centred under the driver.
       const gx = W.x + sx * W.r * 0.90;
       const hy = W.y + sx * grip * 0.05;
+      // The elbow tucks in rather than out: splayed elbows fuse the two arms
+      // and the deltoids into one wide apron across the cockpit, which is the
+      // other half of the bobblehead read.
       const path = [
         [sx * ax, ay, -0.16],
-        [sx * (ax + 0.05), ay - 0.055, 0.04],
-        [(sx * (ax * 0.72 + 0.05) + gx) * 0.5, (ay + hy) * 0.5 - 0.02, 0.16],
+        [sx * ax * 1.02, ay - 0.070, 0.04],
+        [(sx * ax * 0.80 + gx) * 0.5, (ay + hy) * 0.5 - 0.03, 0.17],
         [gx, hy, WZ_HAND - 0.03],
       ];
       limb(out, path, [r0, r0 * 0.90, r0 * 0.80, r0 * 0.74], skin, n, 0.10);
@@ -652,41 +673,118 @@ function drawWheel(c, frame, trim, grip, W) {
 }
 
 /* -------------------------------------------------------------- the figure
- * The driver's whole body is the species' portrait, billboarded into the seat
- * plane and cropped at the cockpit rim. Scale comes from the species' own face
- * circle, so every rider's head lands at the same on-screen size as its HUD
- * portrait next to it - while the body underneath keeps whatever that species
- * actually is: Squirtle's shell rim, Charizard's wings, Garchomp's jaw,
- * Snorlax's bulk, Meowth's charm.
+ * A seated driver is a head *on shoulders*, so the rider is built in two parts:
+ *
+ *   - shoulders, chest and arms are lit kart-local geometry (`buildTorso` /
+ *     `buildArms`), sunk in the seat well and steered by the kart's own
+ *     transform, sized so the deltoid line always reads wider than the skull;
+ *   - the head - and everything the portrait hangs off it: ears, horns, fins,
+ *     crest, wings, tail - is the species' own art, billboarded on top with its
+ *     jaw pinned to that shoulder line.
+ *
+ * Scale is normalised on the art's *head width*, not its face radius, so every
+ * species' head lands at the same fraction of the kart (~27%) instead of at the
+ * same fraction of its own art frame - which is what let a Charizard, whose
+ * portrait is nearly all head, tower over a Garchomp. Species shapes are
+ * untouched: Squirtle keeps its shell rim, Garchomp its fin and jaw, Pikachu
+ * its ears and cheeks.
  */
-export const RIM_Y = 0.99;       // plane y of the cockpit rim (art y = ART_CUT)
-export const HEAD_UNIT = 0.315;  // plane radius the species' face circle maps to
+export const RIM_Y = 0.99;       // plane y of the cockpit rim
+/**
+ * Plane width the species' *head blob* maps to. The kart is ~2.35 plane units
+ * across on screen at the chase camera's three-quarter yaw, so 0.66 puts the
+ * head at ~27% of kart width - the reference proportion for a seated driver.
+ * (Scaling off the head instead of the face radius is what stops a Charizard,
+ * whose art frame is nearly all head, from reading twice a Garchomp's size.)
+ */
+export const HEAD_W = 0.66;
+/** Plane y of the deltoid line - the torso's widest point. */
+export const SHOULDER_Y = 1.20;
+/** Plane y the head's jaw line is pinned to: just over the shoulders. */
+const CHIN_Y = SHOULDER_Y + 0.02;
 
-/** plane units per art unit for this rider. */
-function artScale(rig) {
-  return HEAD_UNIT / (rig.r || 23);
+/** plane units per art unit for this rider - normalised on its head width. */
+function artScale(art) {
+  return HEAD_W / (art.hw || 68);
 }
 
-/** Seated species figure, billboarded into the seat plane. */
+/**
+ * Shoulder half-width in plane units. Tuned so the deltoid line lands ~1.2x the
+ * head's width - the reference's proportion. Wider than that and the torso
+ * stops reading as shoulders and starts reading as a ruff round the neck.
+ */
+function shoulderHalf(rig) {
+  const k = rig.build === 'heavy' ? 0.50 : rig.build === 'slim' ? 0.38 : 0.44;
+  return HEAD_W * k;
+}
+
+/**
+ * Species head (and whatever the portrait hangs off it - ears, fins, crest,
+ * flame) billboarded above the shoulders. The card is placed by the art's own
+ * jaw line, not by its bottom edge, so every species' chin lands on the same
+ * shoulder line however tall its frame is.
+ */
 function drawFigure(c, frame, racer, art, o) {
-  const u = artScale(art.rig);
+  const u = artScale(art);
   const px = SPRITE_HALF * 2 * u * frame.unit(SEAT_Z);
   const cv = riderSprite(racer, px);
   if (!cv) return false;
-  if (!plane(c, frame, SEAT_Z)) return false;
   const w = SPRITE_HALF * 2 * u;
   const h = w * SPRITE_ASPECT;
-  c.translate(o.hx, RIM_Y);
+  // bottom edge of the card, so that art y = chin lands on the shoulder line -
+  // never below the cockpit rim, or the card would paint over the bodywork
+  const foot = Math.max(RIM_Y, CHIN_Y - (ART_CUT - art.chin) * u);
+  const mid = foot + h * 0.5;
+  // calibrate the plane at the card's own mid height: no extrapolation, so the
+  // head stays over the cockpit however hard the kart is yawed or rolled
+  if (!planeAt(c, frame, SEAT_Z, mid)) return false;
+  c.translate(o.hx, 0);
   c.rotate(-o.roll);
-  // billboard squash: the figure is a flat card, so it narrows as the kart yaws
-  c.scale(1 - Math.abs(o.turn) * 0.13, -1);
-  c.translate(o.turn * u * 2.6, 0);
+  // billboard squash: the card is flat, so it narrows a little as the kart yaws
+  c.scale(1 - Math.abs(o.turn) * 0.10, -1);
   try {
     c.imageSmoothingEnabled = true;
-    c.drawImage(cv, -w / 2, -h, w, h);
+    c.drawImage(cv, -w / 2, -h / 2, w, h);
   } catch (e) { /* sprite not ready */ }
   c.restore();
-  return true;
+  return { u, foot, top: foot + h };
+}
+
+/**
+ * Shoulders and chest for a bespoke rider, in kart-local 3D so they are lit,
+ * faceted and steered by exactly the same transform as the bodywork. The
+ * portraits are chibi - head and trunk fused into one blob - so a head cropped
+ * at the jaw has nothing under it; this is that missing torso, sized off the
+ * head so the shoulder line always reads wider than the skull, which is the
+ * single cue that separates "seated driver" from "bobblehead".
+ */
+function buildTorso(rig, o) {
+  const { skin, belly, detail } = o;
+  const n = detail ? 10 : 6;
+  const out = [];
+  const sh = shoulderHalf(rig);
+  const dep = sh * (rig.build === 'heavy' ? 0.88 : rig.build === 'slim' ? 0.70 : 0.78);
+  const tilt = (o.grip || 0) * 0.030;
+  const DY = SHOULDER_Y;
+  // waist sunk in the well -> chest -> deltoid line -> a neck that tapers away
+  // under the jaw, so the head overlaps the shoulders instead of sitting in a
+  // bowl of them.
+  const stack = [
+    [0.84, -0.33, sh * 0.78, dep * 0.92],
+    [1.03, -0.29, sh * 0.95, dep * 1.10],
+    [DY, -0.265, sh * 1.00, dep * 1.00],
+    [DY + 0.070, -0.250, sh * 0.72, dep * 0.72],
+    [DY + 0.130, -0.242, sh * 0.42, sh * 0.40],
+  ];
+  const prof = rig.build === 'heavy' ? 0.70 : rig.build === 'slim' ? 1.22 : 1;
+  const rings = stack.map((s, i) => ring(tilt * i * 0.5, s[0], s[1], s[2], s[3], n, prof));
+  loft(out, rings, (k) => (Math.cos((k / n) * TAU) > 0.55 ? belly : skin));
+  // deltoids, so the shoulder line reads as a shoulder and not a barrel edge
+  for (const sx of [-1, 1]) {
+    limb(out, [[sx * sh * 0.52, DY + 0.030, -0.255], [sx * sh * 1.00, DY - 0.034, -0.235]],
+      [sh * 0.31, sh * 0.27], skin, detail ? 8 : 5, 0.04);
+  }
+  return out;
 }
 
 /**
@@ -706,24 +804,30 @@ export function drawDriver(c, frame, sp, racer, opts = {}) {
   const art = riderArt(racer);
   if (art.bespoke) {
     const rig = art.rig;
-    const u = artScale(rig);
-    const skin = hexish(fur);
+    // The torso is a shade deeper than the shell it sits in - same hue, so the
+    // species colour is untouched, but enough separation that the shoulders do
+    // not dissolve into a same-coloured kart (Pikachu in a yellow kart).
+    const skin = hexish(mix(fur, '#1a1208', 0.13));
+    const belly = hexish(rig.belly || mix(fur, '#ffffff', 0.42));
     const glove = hexish(mix(trim, '#ffffff', 0.22));
-    // 1. the species itself, seated and cropped at the rim
-    const drawn = drawFigure(c, frame, racer, art, { turn, roll: lean * 0.6, hx: grip * 0.04 });
-    if (drawn) {
-      // 2. wheel, then 3. both arms closing on its rim - hung off the figure's
-      //    own shoulder line so the reach matches the body that owns it.
-      drawWheel(c, frame, trim, grip, W);
-      // shoulders on the jaw line of the figure's own face circle, so the arms
-      // leave the body under the cheeks instead of out of the ears
-      const sx = clamp(art.bw * u * 0.70, 0.26, 0.46);
-      const sy = RIM_Y + (ART_CUT - (rig.y + rig.r * 0.86)) * u;
-      const arms = buildArms(rig, { skin, glove, grip, detail, wheel: W, sx, sy: clamp(sy, 0.97, 1.16) });
-      if (detail) paint(c, frame, swell(arms, 1.10), { ambient: 0 });
-      paint(c, frame, arms, { ambient: opts.ambient || 0 });
-      return;
-    }
+    // 1. shoulders and chest first - lit geometry the head then sits down onto
+    const ink = hexish(mix(skin, '#150e26', 0.80));
+    const torso = buildTorso(rig, { skin, belly, grip, detail });
+    if (detail) paint(c, frame, swell(torso, 1.035, ink), { ambient: 0 });
+    paint(c, frame, torso, { ambient: opts.ambient || 0 });
+    // 2. the species' own head, billboarded onto the shoulder line. If the seat
+    //    plane is degenerate the head is skipped, but the bespoke rider still
+    //    owns this frame - falling through would stack a second torso on top.
+    drawFigure(c, frame, racer, art, { turn, roll: lean * 0.6, hx: grip * 0.03 });
+    // 3. wheel, then 4. both arms closing on its rim - hung off the torso's
+    //    own deltoid line so the reach matches the shoulders that own it.
+    drawWheel(c, frame, trim, grip, W);
+    const sx = shoulderHalf(rig) * 0.92;
+    const sy = SHOULDER_Y - 0.035;
+    const arms = buildArms(rig, { skin, glove, grip, detail, wheel: W, sx, sy });
+    if (detail) paint(c, frame, swell(arms, 1.075, ink), { ambient: 0 });
+    paint(c, frame, arms, { ambient: opts.ambient || 0 });
+    return;
   }
 
   // ---- fallback (unknown roster id): parametric torso + head -------------

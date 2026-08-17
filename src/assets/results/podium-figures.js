@@ -336,11 +336,117 @@ function stubLegs(c, { top = 104, spread = 16, w = 15, foot = null } = {}) {
   return one(60 - spread) + one(60 + spread);
 }
 
+/** CHUNKY PLANTIGRADE legs: a thick tapered column with a real knee bulge and
+ *  a BROAD flat foot carrying three short pale claws. Deliberately much
+ *  meatier than `stubLegs` (which is a pebble on a nub) - used by the squat
+ *  saurian builds (Charmander, Squirtle) whose old stick legs read as a
+ *  generic plush toy. */
+function chunkyLegs(c, { top = 100, spread = 16, w = 20, foot = null, claw = '#fff0c2',
+  clawN = 3 } = {}) {
+  const fc = foot || c;
+  const q = (v) => Math.round(v * 100) / 100;
+  const one = (s) => {
+    const x = 60 + spread * s;
+    const ay = FEET - 11;                 // ankle line
+    const knee = (top + ay) / 2;
+    return p(`M${q(x - w * 0.48)} ${q(top + 1)}`
+      // hip cap
+      + ` Q${q(x - w * 0.5)} ${q(top - 8)} ${q(x)} ${q(top - 8)}`
+      + ` Q${q(x + w * 0.5)} ${q(top - 8)} ${q(x + w * 0.48)} ${q(top + 1)}`
+      // outer contour: thigh swells at the knee then draws in to the ankle
+      + ` C${q(x + w * 0.62)} ${q(knee - 3)} ${q(x + w * 0.58)} ${q(knee + 5)} ${q(x + w * 0.44)} ${q(ay + 3)}`
+      + ` L${q(x - w * 0.44)} ${q(ay + 3)}`
+      + ` C${q(x - w * 0.58)} ${q(knee + 5)} ${q(x - w * 0.62)} ${q(knee - 3)} ${q(x - w * 0.48)} ${q(top + 1)} Z`,
+    c, OUT, 2.6)
+      // knee crease, so the column is not one flat tube
+      + ln(`M${q(x - w * 0.3)} ${q(knee + 2)} q${q(w * 0.3)} ${q(w * 0.16)} ${q(w * 0.6)} 0`, OUT, 1.5)
+      // BROAD plantigrade foot: a heel mass whose front edge breaks into three
+      // TOE LOBES (a flat slab with notches cut in it reads as a shoe sole).
+      + p(`M${q(x - w * 0.74)} ${q(ay)} Q${q(x)} ${q(ay - 6)} ${q(x + w * 0.74)} ${q(ay)}`
+        + ` Q${q(x + w * 0.9)} ${q(FEET - 5)} ${q(x + w * 0.62)} ${q(FEET - 3)}`
+        + ` L${q(x - w * 0.62)} ${q(FEET - 3)}`
+        + ` Q${q(x - w * 0.9)} ${q(FEET - 5)} ${q(x - w * 0.74)} ${q(ay)} Z`, fc, OUT, 2.4)
+      + Array.from({ length: clawN }, (_, i) => {
+        const cx = x + (i - (clawN - 1) / 2) * w * 0.46;
+        const tw = w * 0.24;
+        // toe lobe: a rounded bump hanging off the front of the foot ...
+        return p(`M${q(cx - tw)} ${q(FEET - 8)}`
+          + ` C${q(cx - tw * 1.12)} ${q(FEET - 1)} ${q(cx + tw * 1.12)} ${q(FEET - 1)} ${q(cx + tw)} ${q(FEET - 8)} Z`,
+        fc, OUT, 2.2)
+          // ... tipped with a short blunt claw sitting ON the sole line
+          + p(`M${q(cx - tw * 0.62)} ${q(FEET - 4.4)}`
+            + ` Q${q(cx)} ${q(FEET - 0.2)} ${q(cx + tw * 0.62)} ${q(FEET - 4.4)}`
+            + ` Q${q(cx)} ${q(FEET - 2.6)} ${q(cx - tw * 0.62)} ${q(FEET - 4.4)} Z`, claw, OUT, 1.3);
+      }).join('');
+  };
+  return one(-1) + one(1);
+}
+
+/** A heavy BROW SHELF: a symmetric pair of raised ridges that overhang the
+ *  eyes, plus the frown seam between them. This is what stops a round skull
+ *  from reading as a ball with stickers on it. */
+function browRidge(cx, y, dx, w, h, c) {
+  const q = (v) => Math.round(v * 100) / 100;
+  const one = (a) => {
+    const bx = cx + a * dx;
+    return p(`M${q(bx - a * w)} ${q(y + h * 0.5)}`
+      + ` C${q(bx - a * w * 0.5)} ${q(y - h)} ${q(bx + a * w * 0.7)} ${q(y - h * 0.85)} ${q(bx + a * w)} ${q(y + h * 0.1)}`
+      + ` C${q(bx + a * w * 0.4)} ${q(y + h * 0.62)} ${q(bx - a * w * 0.45)} ${q(y + h * 0.86)} ${q(bx - a * w)} ${q(y + h * 0.5)} Z`,
+    c, OUT, 2.1);
+  };
+  return one(-1) + one(1);
+}
+
 /** QUADRUPED legs: four columns, front pair inset and shorter. */
 function quadLegs(c, { top = 100, xs = [26, 44, 76, 94], w = 14, foot = null } = {}) {
   const fc = foot || c;
   return xs.map((x) => rr(x - w / 2, top, w, FEET - top - 3, w * 0.42, c)
     + e(x, FEET - 3, w * 0.72, w * 0.38, fc)).join('');
+}
+
+/**
+ * QUADRUPED legs WITH MASS. `quadLegs` draws four identical rounded pills,
+ * which reads as furniture (the round-9 note on Bulbasaur: "four identical pill
+ * legs"). This draws each leg as a tapered column with a hip cap, an outward
+ * knee swell + crease, and a broad plantigrade foot whose front edge breaks
+ * into blunt CLAWED TOE LOBES - the same anatomy `chunkyLegs` gives bipeds.
+ */
+function stoutQuadLegs(c, { top = 100, xs = [26, 46, 76, 96], w = 18, foot = null,
+  claw = '#fff0c2', clawN = 3, far = null } = {}) {
+  const q = (v) => Math.round(v * 100) / 100;
+  const one = (x, i) => {
+    const hw = w / 2;
+    const near = i === 0 || i === 3;         // near pair reads a touch heavier
+    const col = near ? c : (far || c);       // far pair sits back in shade
+    const fc = foot || col;
+    const kw = hw * (near ? 1.2 : 1.06);
+    const ay = FEET - 10;                    // ankle line
+    const knee = (top + ay) / 2 + 2;
+    return p(`M${q(x - hw)} ${q(top)}`
+      + ` Q${q(x - hw - 1)} ${q(top - 8)} ${q(x)} ${q(top - 8)}`
+      + ` Q${q(x + hw + 1)} ${q(top - 8)} ${q(x + hw)} ${q(top)}`
+      + ` C${q(x + kw)} ${q(knee - 4)} ${q(x + kw * 0.94)} ${q(knee + 4)} ${q(x + hw * 0.8)} ${q(ay + 2)}`
+      + ` L${q(x - hw * 0.8)} ${q(ay + 2)}`
+      + ` C${q(x - kw * 0.94)} ${q(knee + 4)} ${q(x - kw)} ${q(knee - 4)} ${q(x - hw)} ${q(top)} Z`,
+    col, OUT, 2.6)
+      // knee crease so the column is not a flat tube
+      + ln(`M${q(x - hw * 0.56)} ${q(knee + 1)} q${q(hw * 0.56)} ${q(w * 0.15)} ${q(hw * 1.12)} 0`, OUT, 1.4)
+      // broad foot: heel mass, front edge notched into toes
+      + p(`M${q(x - hw * 1.14)} ${q(ay)} Q${q(x)} ${q(ay - 5)} ${q(x + hw * 1.02)} ${q(ay)}`
+        + ` Q${q(x + hw * 1.22)} ${q(FEET - 4.5)} ${q(x + hw * 0.86)} ${q(FEET - 2.6)}`
+        + ` L${q(x - hw * 0.98)} ${q(FEET - 2.6)}`
+        + ` Q${q(x - hw * 1.34)} ${q(FEET - 4.5)} ${q(x - hw * 1.14)} ${q(ay)} Z`, fc, OUT, 2.4)
+      // three blunt claws sitting ON the sole line - the read is "toes", so no
+      // extra crease clutter on top of them
+      + Array.from({ length: clawN }, (_, k) => {
+        const cx = x + (k - (clawN - 1) / 2) * w * 0.4;
+        const tw = w * 0.16;
+        return p(`M${q(cx - tw)} ${q(FEET - 5.2)}`
+          + ` Q${q(cx)} ${q(FEET - 0.6)} ${q(cx + tw)} ${q(FEET - 5.2)}`
+          + ` Q${q(cx)} ${q(FEET - 3.6)} ${q(cx - tw)} ${q(FEET - 5.2)} Z`, claw, OUT, 1.2);
+      }).join('');
+  };
+  return xs.map(one).join('');
 }
 
 /** Round eyes with a highlight. */
@@ -493,7 +599,8 @@ const blush = (cx, y, dx, r, col = '#ff9aa8') =>
   ef(cx - dx, y, r, r * 0.72, col, 0.75) + ef(cx + dx, y, r, r * 0.72, col, 0.75);
 
 export const KIT = {
-  p, pf, e, ef, ln, rr, limb, digiLegs, pillarLegs, stubLegs, quadLegs,
+  p, pf, e, ef, ln, rr, limb, digiLegs, pillarLegs, stubLegs, quadLegs, stoutQuadLegs,
+  chunkyLegs, browRidge,
   paw, claw3, wyvernHand, stoutClaw, fist, webHand, padPaw, slimHand,
   eyes, dotEyes, reptileEyes, smile, closedEyes, gloss, teeth,
   snout, nostrils, grin, hornPair, blush, batWing,
@@ -756,7 +863,9 @@ POSE.snorlax = (c) => ''
 POSE.pikachu = (c) => ''
   + p('M78 106 L98 96 L86 86 L110 72 L98 92 L116 88 L86 116 Z', c.color)
   + pf('M78 106 L92 100 L84 92 Z', '#8a5a1e')
-  + stubLegs(c.color, { top: 106, spread: 17, w: 18, foot: c.color })
+  // knee'd legs on three-toed feet: the pill stubs made the legs furniture and
+  // left the cheeks + tail carrying the whole species read
+  + chunkyLegs(c.color, { top: 104, spread: 16, w: 15, foot: c.color, claw: '#c98b1e' })
   + e(60, 96, 28, 26, c.color)
   + ef(60, 102, 19, 17, c.belly, 0.75)
   + limb(38, 86, 24, 102, 8, c.color, 6.5, padPaw) + limb(82, 86, 96, 102, 8, c.color, 6.5, padPaw)
@@ -766,7 +875,10 @@ POSE.pikachu = (c) => ''
   + gloss(48, 44, 13, 8)
   + ef(34, 68, 7.8, 7, '#e8433c') + ef(86, 68, 7.8, 7, '#e8433c')
   + dotEyes(49, 71, 53, 4.8)
-  + pf('M60 64 l-3.6 -3.6 h7.2 Z', OUT) + smile(60, 68, 7.5);
+  // small MOUSE MUZZLE + button nose: the head was a smooth ball whose only
+  // cues were the cheek discs and the tail
+  + snout(60, 69, 9.5, 5.5, c.color, c.belly)
+  + pf('M60 64.5 l-3.6 -3.6 h7.2 Z', OUT) + smile(60, 68, 7);
 
 /* -- MEWTWO --------------------------------------------------------------
  * Plan: tall and gaunt - oversized cranium, a tube running from the skull to
@@ -779,16 +891,24 @@ POSE.mewtwo = (c) => ''
     + ' C66 48 54 48 46 54 Z', c.color)
   + pf('M50 62 C47 72 47 84 50 92 C56 98 64 98 70 92 C73 84 73 72 70 62'
     + ' C64 58 56 58 50 62 Z', c.accent)
-  + limb(44, 60, 24, 88, 7.5, c.color, 6.2, slimHand) + limb(76, 60, 96, 88, 7.5, c.color, 6.2, slimHand)
+  + limb(44, 60, 24, 88, 9.5, c.color, 6.8, slimHand, 0.4)
+  + limb(76, 60, 96, 88, 9.5, c.color, 6.8, slimHand, 0.4)
   + ln('M68 22 C92 28 94 48 84 58', c.accent, 6)
-  // big cranium with a domed crest
-  + p('M60 2 C80 2 90 18 90 34 C90 50 78 60 60 60 C42 60 30 50 30 34'
-    + ' C30 18 40 2 60 2 Z', c.color)
+  // EAR HORNS: a swept pair rooted on the temples (drawn behind the skull)
+  + hornPair(60, 16, 23, 13, 5, c.color, c.accent)
+  // big cranium: the lower half draws IN to a narrow muzzle root instead of
+  // closing as a circle, so the snout below breaks the outline
+  + p('M60 2 C80 2 90 18 90 34 C90 45 84 52 74 55'
+    + ' C69 56.5 51 56.5 46 55 C36 52 30 45 30 34 C30 18 40 2 60 2 Z', c.color)
   + p('M60 -6 q11 2 9 12 q-9 5 -18 0 q-2 -10 9 -12 Z', c.color)
-  + gloss(46, 18, 12, 8)
+  // FELINE MUZZLE + heavy chin: the psychic cat has a short blunt snout, and
+  // without it this head was a white balloon identifiable only by its tail.
+  + snout(60, 56, 12, 9, c.color, c.belly)
+  + ln('M60 54.6 v3.2 M60 57.8 q-4.4 3.8 -8 0.4 M60 57.8 q4.4 3.8 8 0.4', OUT, 1.9)
+  + browRidge(60, 26, 12.5, 8, 4.4, c.color)
+  + gloss(46, 14, 12, 8)
   + ef(46, 32, 5.6, 6.4, '#b58cff') + ef(74, 32, 5.6, 6.4, '#b58cff')
-  + ef(46, 32, 2.6, 4.2, OUT) + ef(74, 32, 2.6, 4.2, OUT)
-  + ln('M52 46 q8 5 16 0', OUT, 2.2);
+  + ef(46, 32, 2.6, 4.2, OUT) + ef(74, 32, 2.6, 4.2, OUT);
 
 /* -- GARCHOMP : land shark - jet fins off the head AND arms, red belly ---- */
 POSE.garchomp = (c) => ''
@@ -815,25 +935,73 @@ POSE.garchomp = (c) => ''
   + ef(46, 32, 5.6, 4.2, '#ffd63b') + ef(74, 32, 5.6, 4.2, '#ffd63b')
   + ef(46, 32, 2.5, 3.6, OUT) + ef(74, 32, 2.5, 3.6, OUT);
 
-/* -- MACHAMP : FOUR arms, tiny head, gigantic shoulders, weightlifter ----- */
-POSE.machamp = (c) => ''
-  + pillarLegs(c.color, { top: 100, spread: 19, w: 21, foot: c.belly })
-  + rr(38, 106, 44, 13, 5, '#2b2338')
-  // upper arms flexed overhead
-  + limb(38, 58, 12, 36, 11, c.color, 9, fist) + limb(82, 58, 108, 36, 11, c.color, 9, fist)
-  // massive trapezoid torso
-  + p('M34 52 C30 68 30 88 36 104 C48 114 72 114 84 104 C90 88 90 68 86 52'
-    + ' C72 42 48 42 34 52 Z', c.color)
-  + pf('M44 62 C40 76 40 92 44 102 C54 108 66 108 76 102 C80 92 80 76 76 62'
-    + ' C66 57 54 57 44 62 Z', c.belly)
-  + ln('M60 62 v40', '#c9c0ac', 2.2)
-  + limb(40, 72, 16, 92, 10, c.color, 8, fist) + limb(80, 72, 104, 92, 10, c.color, 8, fist)
-  + e(60, 28, 22, 20, c.color)
-  + pf('M40 22 C46 8 74 8 80 22 C72 12 48 12 40 22 Z', c.accent)
-  + p('M46 34 C52 44 68 44 74 34 C72 44 66 48 60 48 C54 48 48 44 46 34 Z', c.belly, OUT, 2.2)
-  + ln('M40 30 h10 M70 30 h10', OUT, 3)
-  + ef(48, 28, 4.2, 4.6, '#ffffff') + ef(72, 28, 4.2, 4.6, '#ffffff')
-  + ef(48, 28, 2, 2.8, OUT) + ef(72, 28, 2, 2.8, OUT);
+/* -- MACHAMP -------------------------------------------------------------
+ * Round-3 audit - the figure was identifiable ONLY by its accessory (four
+ * arms): a smooth ball head with a grin printed on it, four hairline limbs
+ * ending in identical pale mitts, and one flat cream oval for a front.
+ * Regeared like Charmander/Blaziken:
+ *   - The SKULL steps in at the cheeks and a WIDE LIPPED MUZZLE projects below
+ *     it - Machamp's signature heavy jaw with a raised upper lip, a hard mouth
+ *     seam, corner creases and a chin plate.
+ *   - Three BROWN crown ridges (they were body-blue, i.e. invisible), dark eye
+ *     masks around small white eyes, and a brow shelf.
+ *   - The front is now anatomy: two PEC slabs with a sternum seam over a
+ *     three-band abdomen, not one cream oval.
+ *   - All four arms are markedly thicker, and the dark trunks carry a belt.
+ */
+POSE.machamp = (c) => {
+  const ridge = '#a8763c';              // the three brown crown ridges
+  const trunks = '#2b2338';
+  return ''
+    + pillarLegs(c.color, { top: 100, spread: 19, w: 22, foot: c.belly })
+    // upper arms flexed overhead - THICK
+    + limb(38, 58, 11, 34, 13, c.color, 10, fist)
+    + limb(82, 58, 109, 34, 13, c.color, 10, fist)
+    // massive trapezoid torso
+    + p('M34 52 C30 68 30 88 36 104 C48 114 72 114 84 104 C90 88 90 68 86 52'
+      + ' C72 42 48 42 34 52 Z', c.color)
+    // PEC SLABS: two shaped chest masses with a sternum seam between them
+    + [-1, 1].map((s) => pf(`M60 ${58} C${60 + 5 * s} 55 ${60 + 17 * s} 56 ${60 + 20 * s} 62`
+      + ` C${60 + 22 * s} 68 ${60 + 18 * s} 75 ${60 + 12 * s} 76`
+      + ` C${60 + 5 * s} 77 60 74 60 70 Z`, c.belly)).join('')
+    + ln('M60 57 v20', '#b9ae98', 2.2)
+    + ln('M42 77 C50 82 70 82 78 77', '#b9ae98', 2)
+    // three-band abdomen under the pecs
+    + pf('M46 79 C43 88 43 98 47 105 C53 109 67 109 73 105 C77 98 77 88 74 79'
+      + ' C66 76 54 76 46 79 Z', c.belly)
+    + ln('M60 80 v25 M47 88 C53 92 67 92 73 88 M48 97 C54 101 66 101 72 97', '#b9ae98', 1.8)
+    // lower arms - THICK
+    + limb(40, 74, 15, 94, 11.5, c.color, 9, fist)
+    + limb(80, 74, 105, 94, 11.5, c.color, 9, fist)
+    // dark trunks with a belt line
+    + rr(37, 104, 46, 15, 5, trunks)
+    + ln('M38 109 h44', '#6d6284', 2.4)
+    // ------------------------------------------------------------------ HEAD
+    // three BROWN crown ridges (they used to be painted in body blue)
+    + p('M46 13 L41 -3 L54 8 Z', ridge) + p('M60 9 L60 -7 L69 6 Z', ridge)
+    + p('M74 13 L79 -3 L66 8 Z', ridge)
+    // SKULL: dome that pulls IN at the cheeks and stops above the chin
+    + p('M38 26 C38 10 47 2 60 2 C73 2 82 10 82 26'
+      + ' C82 33 79 37 73 38.5 C68 40 52 40 47 38.5'
+      + ' C41 37 38 33 38 26 Z', c.color)
+    // MUZZLE: a WIDE heavy lipped jaw projecting past that step
+    + p('M40 35 C36 45 43 55 60 55 C77 55 84 45 80 35'
+      + ' C70 41 50 41 40 35 Z', c.color)
+    // raised upper lip + the hard mouth seam + corner creases + chin plate
+    + pf('M42 41 C48 46 72 46 78 41 C74 48 46 48 42 41 Z', c.belly)
+    + ln('M42.5 42.5 C49 48.5 71 48.5 77.5 42.5', OUT, 2.8)
+    + ln('M44 43 q-1.5 4 0.5 6 M76 43 q1.5 4 -0.5 6', OUT, 1.8)
+    + pf('M47 51 C52 54.5 68 54.5 73 51 C69 55.5 51 55.5 47 51 Z', c.belly)
+    + ef(55.6, 37.4, 1.7, 1.3, OUT) + ef(64.4, 37.4, 1.7, 1.3, OUT)
+    // jaw hinges
+    + ef(40.5, 36.5, 4.2, 3.4, c.color) + ef(79.5, 36.5, 4.2, 3.4, c.color)
+    // dark EYE MASKS with small white eyes inside, under a brow shelf
+    + browRidge(60, 20, 10.5, 7.4, 3.5, c.color)
+    + ef(49, 27, 7.4, 5.4, c.accent) + ef(71, 27, 7.4, 5.4, c.accent)
+    + ef(49.5, 26.6, 4, 3.6, '#ffffff') + ef(70.5, 26.6, 4, 3.6, '#ffffff')
+    + ef(50, 27, 1.9, 2.6, OUT) + ef(71, 27, 1.9, 2.6, OUT)
+    + gloss(48, 12, 11, 5.6);
+};
 
 /* -- TYRANITAR : armour plates, back spikes, thick tail, diamond belly ---- */
 POSE.tyranitar = (c) => ''
@@ -930,24 +1098,118 @@ POSE.greninja = (c) => {
     + ef(52, 42, 1.7, 1.4, OUT) + ef(68, 42, 1.7, 1.4, OUT);
 };
 
-/* -- BLAZIKEN : long-legged fire fighter, head crest, flame wrists -------- */
-POSE.blaziken = (c) => ''
-  + digiLegs(c.belly, { hip: 84, spread: 19, thigh: 20, foot: c.belly, claw: c.accent })
-  + ln('M36 100 C24 108 18 116 14 124 M84 100 C96 108 102 116 106 124', c.belly, 6)
-  + p('M42 48 C36 62 34 78 40 92 C50 100 70 100 80 92 C86 78 84 62 78 48'
-    + ' C68 42 52 42 42 48 Z', c.color)
-  + pf('M48 56 C45 68 45 82 48 90 C56 96 64 96 72 90 C75 82 75 68 72 56'
-    + ' C64 52 56 52 48 56 Z', c.belly)
-  + limb(40, 56, 18, 80, 9, c.color, 7, claw3) + limb(80, 56, 102, 80, 9, c.color, 7, claw3)
-  + pf('M18 80 C6 70 6 54 12 46 C16 60 24 70 28 78 Z', '#ffd63b')
-  + pf('M102 80 C114 70 114 54 108 46 C104 60 96 70 92 78 Z', '#ffd63b')
-  + p('M36 28 C36 14 46 6 60 6 C74 6 84 14 84 28 C84 40 74 48 60 48'
-    + ' C46 48 36 40 36 28 Z', c.color)
-  + p('M44 12 L28 -12 L56 4 Z', c.belly) + p('M76 12 L92 -12 L64 4 Z', c.belly)
-  + p('M60 -4 L50 16 L70 16 Z', c.belly)
-  + pf('M42 32 C50 44 70 44 78 32 C76 44 68 48 60 48 C52 48 44 44 42 32 Z', c.belly)
-  + ef(48, 26, 5.2, 5.6, '#ffd63b') + ef(72, 26, 5.2, 5.6, '#ffd63b')
-  + ef(48, 26, 2.5, 3.6, OUT) + ef(72, 26, 2.5, 3.6, OUT);
+/* -- BLAZIKEN ------------------------------------------------------------
+ * Round-3 cleanup - "still a generic mascot": the old build was a smooth red
+ * ball head wearing three straight cream horns, two HAIRLINE arms, a pair of
+ * DETACHED floating yellow banana blades hanging in mid-air beside the elbows,
+ * and a plain cream lower body that read as a diaper. Regeared the way
+ * Charmander and Bulbasaur were:
+ *   - A real BEAK: the skull path steps in at the cheeks and a pointed two-
+ *     mandible beak projects a clear 20 units BELOW that step, so it breaks
+ *     the skull silhouette instead of being printed on it. Jaw-hinge bumps,
+ *     a beak seam, a darker lower mandible and nostrils on the upper plane.
+ *   - A FEATHER LANGUAGE (`plume`) used in three places, so the species read
+ *     is spread across the whole figure: the tall THREE-PLUME head crest
+ *     (centre plume tallest, side pair swept back), the cream NECK RUFF
+ *     fanning out under the jaw, and the red THIGH TUFTS that hang over the
+ *     hips - which is what kills the diaper.
+ *   - THICK TWO-SEGMENT ARMS: a heavy upper arm to a real elbow, then a
+ *     forearm ending in an ATTACHED three-clawed hand. The wrist flames are
+ *     now short licks rooted ON the wrists, overlapping the hands.
+ *   - Bird TALONS on cream shanks below the tufts (`digiLegs`).
+ */
+POSE.blaziken = (c) => {
+  const beak = '#f7d27a';               // warm horn gold: the beak's own value
+  const lower = '#dcb45c';              // darker lower mandible
+  /* one feather: a tapered lens from a buried root to a fine tip. */
+  const plume = (x, y, tx, ty, w, fill, inner) => {
+    const q = (v) => Math.round(v * 100) / 100;
+    const dx = tx - x; const dy = ty - y;
+    const L = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / L) * w; const ny = (dx / L) * w;
+    const mx = (x + tx) / 2; const my = (y + ty) / 2;
+    const lens = (k) => `M${q(x - nx * k)} ${q(y - ny * k)}`
+      + ` Q${q(mx - nx * 1.2 * k)} ${q(my - ny * 1.2 * k)} ${q(tx)} ${q(ty)}`
+      + ` Q${q(mx + nx * 1.2 * k)} ${q(my + ny * 1.2 * k)} ${q(x + nx * k)} ${q(y + ny * k)} Z`;
+    return p(lens(1), fill, OUT, 2.3)
+      + (inner ? pf(lens(0.42), inner) : '')
+      // midrib: the line that makes a lens read as a FEATHER, not an ear
+      + ln(`M${q(x)} ${q(y)} L${q(tx)} ${q(ty)}`, inner || '#d8c49a', 1.5);
+  };
+  return ''
+    // BIRD LEGS: cream shanks on long taloned feet
+    + digiLegs(c.belly, {
+      hip: 82, spread: 22, thigh: 14, shin: 11, foot: c.belly,
+      claw: '#4a3524', footW: 1.02, clawLen: 1.05,
+    })
+    // THIGH TUFTS: long red feathers hanging over the hips and down the outside
+    // of each thigh - this is what kills the old cream-diaper read
+    + [-1, 1].map((s) => plume(60 + 13 * s, 66, 60 + 32 * s, 96, 7.6, c.color, c.accent)
+      + plume(60 + 16 * s, 68, 60 + 25 * s, 110, 8.2, c.color, c.accent)
+      + plume(60 + 8 * s, 70, 60 + 11 * s, 104, 6.8, c.color, c.accent)).join('')
+    // TORSO: broad chest, pinched waist
+    + p('M40 42 C34 55 33 70 38 82 C42 90 48 95 60 95 C72 95 78 90 82 82'
+      + ' C87 70 86 55 80 42 C70 36 50 36 40 42 Z', c.color)
+    // chest plate top kept LOW (y=58) so the gold beak above it reads against
+    // RED, not against a second field of cream
+    + pf('M48 64 C44 71 44 80 48 89 C53 92.5 67 92.5 72 89 C76 80 76 71 72 64'
+      + ' C66 60 54 60 48 64 Z', c.belly)
+    + ln('M60 66 v24', '#dcc79a', 2)
+    + ln('M50 76 C55 80 65 80 70 76 M51 85 C56 89 64 89 69 85', '#dcc79a', 1.6)
+    // ARMS: heavy upper arm -> real elbow -> forearm -> ATTACHED clawed hand
+    + limb(41, 48, 21, 68, 12.5, c.color)
+    + limb(22, 67, 14, 92, 11.5, c.color, 9.2, claw3, 0.9)
+    + limb(79, 48, 99, 68, 12.5, c.color)
+    + limb(98, 67, 106, 92, 11.5, c.color, 9.2, claw3, 0.9)
+    // elbow fill, so the two segments read as one jointed arm (UNSTROKED: a
+    // keylined circle here reads as a robot ball-joint)
+    + ef(21.5, 67.5, 7.2, 6.6, c.color)
+    + ef(98.5, 67.5, 7.2, 6.6, c.color)
+    // WRIST FLAMES: short licks rooted ON the wrist, just outboard of the hand
+    + [-1, 1].map((s) => {
+      const x = 60 + 48 * s;
+      return hot(`M${x - 3 * s} 88 C${x - 10 * s} 79 ${x - 7 * s} 67 ${x + 3 * s} 58`
+        + ` C${x + 1 * s} 68 ${x + 8 * s} 69 ${x + 8 * s} 63`
+        + ` C${x + 13 * s} 74 ${x + 9 * s} 85 ${x + 3 * s} 91 Z`, '#ff8e2b')
+        + hot(`M${x - 1 * s} 87 C${x - 5 * s} 79 ${x - 3 * s} 69 ${x + 4 * s} 62`
+          + ` C${x + 4 * s} 70 ${x + 8 * s} 71 ${x + 7 * s} 67`
+          + ` C${x + 11 * s} 76 ${x + 7 * s} 84 ${x + 4 * s} 88 Z`, '#ffd63b');
+    }).join('')
+    // NECK RUFF: cream feathers fanning out from under the jaw
+    + [[-15, -29], [-9, -20], [9, 20], [15, 29]]
+      .map(([rx, tx]) => plume(60 + rx, 35, 60 + tx, 53, 5.6, c.belly, '#e0cba2')).join('')
+    // HEAD CREST: three TALL slim plumes, centre tallest, side pair swept back
+    // (tips stop at y=-7: the render box bleeds only 8 units above the rig)
+    // (swept OUT more than up, so the outer pair cannot read as a pair of ears)
+    + plume(49, 13, 24, -1, 5.4, c.color, c.accent)
+    + plume(71, 13, 96, -1, 5.4, c.color, c.accent)
+    + plume(54, 9, 41, -6, 3.6, c.color, c.accent)
+    + plume(66, 9, 79, -6, 3.6, c.color, c.accent)
+    + plume(60, 12, 60, -7.5, 6, c.color, c.accent)
+    // SKULL: dome whose lower silhouette pulls IN at the cheeks and stops well
+    // above the chin, so the beak below breaks the outline
+    + p('M36 24 C36 9 47 1 60 1 C73 1 84 9 84 24'
+      + ' C84 31 80 36 73 37.6 C67 39 53 39 47 37.6'
+      + ' C40 36 36 31 36 24 Z', c.color)
+    // BEAK: a pointed two-mandible wedge projecting a clear 19 units past that
+    // step, in a warm horn gold so it never merges with the cream chest plate
+    + p('M44 33.5 C43.5 44 50.5 53.5 60 57.5 C69.5 53.5 76.5 44 76 33.5'
+      + ' C68 39 52 39 44 33.5 Z', beak)
+    + pf('M46.4 42.6 C48.6 49.4 54 55.4 60 57.5 C66 55.4 71.4 49.4 73.6 42.6'
+      + ' C68.6 46.6 51.4 46.6 46.4 42.6 Z', lower)
+    + ln('M45.6 41.6 C50.5 47.8 69.5 47.8 74.4 41.6', OUT, 2.4)
+    // centre ridge down the upper mandible
+    + ln('M60 36.5 v5', '#dcb45c', 1.5)
+    + ef(55.6, 38.2, 1.8, 1.4, OUT) + ef(64.4, 38.2, 1.8, 1.4, OUT)
+    // jaw-hinge bumps: the beak is socketed into the skull, not glued on
+    + ef(44.5, 35, 4.6, 3.4, c.color) + ef(75.5, 35, 4.6, 3.4, c.color)
+    // BROW SHELF over the eyes, so they sit under bone
+    + browRidge(60, 19, 11, 7.6, 3.6, c.color)
+    + gloss(47, 11, 10.5, 5.6)
+    + ef(49.5, 25.5, 5.4, 6, '#fff6d8') + ef(70.5, 25.5, 5.4, 6, '#fff6d8')
+    + ef(50.1, 26.5, 2.5, 3.6, OUT) + ef(71.1, 26.5, 2.5, 3.6, OUT)
+    + ef(47.4, 23, 1.7, 1.7, '#ffffff') + ef(68.4, 23, 1.7, 1.7, '#ffffff');
+};
 
 /* -- MEOWTH : slim cream cat, koban coin, whiskers, curled tail ---------- */
 POSE.meowth = (c) => ''
@@ -958,31 +1220,59 @@ POSE.meowth = (c) => ''
   + limb(40, 88, 28, 102, 7.5, '#f6ead0', 6, padPaw) + limb(80, 88, 92, 102, 7.5, '#f6ead0', 6, padPaw)
   + p('M40 40 L28 8 L56 30 Z', '#f6ead0') + p('M80 40 L92 8 L64 30 Z', '#f6ead0')
   + pf('M36 20 L30 9 L48 26 Z', '#e8a0a8') + pf('M84 20 L90 9 L72 26 Z', '#e8a0a8')
-  + p('M60 26 C80 26 92 40 92 56 C92 70 78 80 60 80 C42 80 28 70 28 56'
-    + ' C28 40 40 26 60 26 Z', '#f6ead0')
-  + gloss(46, 42, 12, 7)
+  // SKULL: a wide cat cranium whose cheeks pull in to a muzzle root, so the
+  // snout below breaks the outline (the old head was a cream ball whose only
+  // species cue was the coin bolted to its forehead)
+  + p('M60 26 C80 26 92 40 92 56 C92 66 86 73 76 76'
+    + ' C70 77.5 50 77.5 44 76 C34 73 28 66 28 56 C28 40 40 26 60 26 Z', '#f6ead0')
+  // MUZZLE: a broad cat snout with whisker pads, a pale chin and the W lip
+  + snout(60, 77, 14, 10, '#f6ead0', '#efe0be')
+  + ef(49.5, 74.5, 5, 4, '#f6ead0') + ef(70.5, 74.5, 5, 4, '#f6ead0')
+  + gloss(46, 40, 12, 7)
   + e(60, 32, 10, 7.5, '#ffd63b', '#b07d18', 2.4)
   + ln('M54 32 h12', '#b07d18', 2)
-  + dotEyes(47, 73, 56, 4.6)
-  + pf('M60 64 l-3.8 -4.2 h7.6 Z', '#e8433c')
-  + ln('M60 66 v3 M60 69 q-7 6 -13 0 M60 69 q7 6 13 0', OUT, 2.2)
-  + ln('M30 58 l-16 -6 M30 65 l-17 4 M90 58 l16 -6 M90 65 l17 4', OUT, 2);
+  + browRidge(60, 48, 12, 8, 4, '#f6ead0')
+  + dotEyes(47, 73, 58, 4.6)
+  + pf('M60 72 l-3.8 -4.2 h7.6 Z', '#e8433c')
+  + ln('M60 74 v3 M60 77 q-7 6 -13 0 M60 77 q7 6 13 0', OUT, 2.2)
+  + ln('M32 64 l-18 -7 M32 71 l-19 5 M88 64 l18 -7 M88 71 l19 5', OUT, 2);
 
-/* -- EEVEE : quadruped fox, giant collar ruff, bushy tail ----------------- */
+/* -- EEVEE ---------------------------------------------------------------
+ * Round 8 audit: a generic quadruped whose only species cues were two ear
+ * triangles. Rebuilt as a THREE-QUARTER fox: the skull is a wedge that tapers
+ * forward-left into a pointed MUZZLE with a black nose and an open jaw (a side
+ * muzzle is correct here - this body is turned, unlike the front-on bipeds),
+ * a brow shelf over the eyes, big scalloped COLLAR RUFF at the neck, and a fat
+ * scalloped tail plume.
+ */
 POSE.eevee = (c) => ''
-  + p('M84 88 C112 82 112 54 106 40 C118 62 112 92 92 100 C84 102 82 96 84 88 Z', '#f0dfc0')
-  + quadLegs(c.color, { top: 102, xs: [30, 48, 74, 92], w: 13, foot: c.accent })
-  + p('M26 88 C34 66 48 58 66 60 C88 62 98 78 96 92 C94 102 76 106 58 106'
-    + ' C38 106 22 100 26 88 Z', c.color)
-  // BOTH ears rooted on the skull (they used to float off over the back)
-  + p('M28 40 L14 4 L46 26 Z', c.color) + p('M62 36 L76 2 L44 24 Z', c.color)
-  + pf('M27 24 L17 6 L38 22 Z', '#c9a06a') + pf('M63 22 L73 5 L52 20 Z', '#c9a06a')
-  + e(44, 56, 28, 25, c.color)
-  + p('M16 72 C36 88 70 82 84 72 C94 68 96 82 84 90 C68 100 34 100 20 90'
-    + ' C10 84 10 68 16 72 Z', '#f0dfc0')
-  + gloss(34, 42, 12, 7)
-  + dotEyes(31, 57, 54, 4.8)
-  + pf('M44 62 l-4.4 -4.6 h8.8 Z', OUT) + smile(44, 66, 6.5);
+  // BUSHY TAIL PLUME off the right hip: a fat scalloped fan, not a whip
+  + p('M80 98 C96 102 110 94 115 76 C118 62 114 50 108 42'
+    + ' C128 52 136 80 126 100 C118 114 94 120 82 112 C76 108 75 100 80 98 Z', '#f0dfc0')
+  + ln('M90 110 C104 104 114 90 116 72', '#d8c4a0', 2)
+  + quadLegs(c.color, { top: 102, xs: [34, 52, 76, 94], w: 14, foot: c.accent })
+  // barrel body, hips higher than the shoulders
+  + p('M34 84 C40 66 54 58 70 60 C90 62 100 76 98 92 C96 103 78 108 60 108'
+    + ' C42 108 30 100 34 84 Z', c.color)
+  // BOTH ears rooted on the skull
+  + p('M24 42 L10 6 L42 28 Z', c.color) + p('M60 34 L80 6 L46 21 Z', c.color)
+  + pf('M24 26 L14 8 L35 24 Z', '#c9a06a') + pf('M62 20 L75 8 L53 17 Z', '#c9a06a')
+  // SKULL: a wedge, wide at the crown, tapering forward-left
+  + p('M44 30 C60 30 72 42 71 56 C70 68 60 76 46 76'
+    + ' C34 76 24 70 20 60 C16 50 22 36 30 32 C34 30 39 30 44 30 Z', c.color)
+  // MUZZLE: a pointed fox snout projecting clear of the skull, black nose,
+  // open jaw underneath
+  + p('M22 54 C14 53 6 58 3 65 C9 71 18 73 25 70 C29 67 28 56 22 54 Z', c.color)
+  + p('M8 59.5 C4 60.5 1.5 63 1 65.5 C4.5 68.5 9 69 12 67.5 C9.5 65 8.5 62 8 59.5 Z', c.accent, OUT, 2.2)
+  + ef(5.4, 63.4, 3.4, 2.7, OUT)
+  + ln('M8 68 C12 72 20 72 24 68', OUT, 2.2)
+  // COLLAR RUFF: a deep scalloped mane at the neck, well clear of the face
+  + p('M30 72 C42 90 74 88 90 78 C99 73 100 90 88 96 C70 105 36 104 26 94'
+    + ' C18 86 20 66 30 72 Z', '#f0dfc0')
+  + ln('M38 88 q6 -8 12 -1 M54 92 q6 -9 12 -2 M70 90 q6 -9 11 -3', '#d8c4a0', 2)
+  + gloss(38, 38, 12, 7)
+  + browRidge(40, 44, 13, 7.5, 4, c.color)
+  + dotEyes(30, 54, 52, 4.8);
 
 /* -- TOGEPI : egg shell up to the shoulders, tiny arms, spiked crown ------ */
 POSE.togepi = (c) => ''
@@ -1005,7 +1295,13 @@ POSE.gardevoir = (c) => ''
   + pf('M60 76 C52 92 40 112 34 122 C48 126 72 126 86 122 C80 112 68 92 60 76 Z', '#e3eaff')
   + p('M52 48 C56 44 64 44 68 48 C70 60 70 68 68 74 C64 78 56 78 52 74'
     + ' C50 68 50 60 52 48 Z', '#f6f8ff')
-  + limb(50, 56, 24, 80, 6, '#f6f8ff', 5.4, slimHand) + limb(70, 56, 96, 80, 6, '#f6f8ff', 5.4, slimHand)
+  // round-3 audit: the arms were hairlines (w 6). Thicker, plus GREEN shoulder
+  // pauldrons and gown folds, so the read is not carried by the skirt alone.
+  + limb(50, 56, 26, 80, 9, '#f6f8ff', 6.4, slimHand)
+  + limb(70, 56, 94, 80, 9, '#f6f8ff', 6.4, slimHand)
+  + p('M50 50 C41 47 33 52 34 60 C41 61 48 57 52 53 Z', c.color)
+  + p('M70 50 C79 47 87 52 86 60 C79 61 72 57 68 53 Z', c.color)
+  + ln('M58 78 C54 94 49 112 43 125 M62 78 C66 94 71 112 77 125', '#d5deff', 2.1)
   + p('M60 58 l-10 18 h20 Z', '#e8433c')
   + p('M60 64 l-8 28 h16 Z', '#e8433c')
   + e(60, 30, 23, 22, '#f6f8ff')
@@ -1061,17 +1357,27 @@ POSE.mew = (c) => ''
 POSE.celebi = (c) => ''
   + p('M44 58 C20 40 4 50 12 68 C22 82 40 76 48 66 Z', '#dff8ff')
   + p('M76 58 C100 40 116 50 108 68 C98 82 80 76 72 66 Z', '#dff8ff')
-  + stubLegs(c.color, { top: 108, spread: 14, w: 13 })
-  + e(60, 88, 25, 24, c.color)
-  + ef(60, 92, 16, 14, '#dff3c8', 0.7)
-  + limb(38, 80, 26, 96, 7, c.color, 6.2, padPaw) + limb(82, 80, 94, 96, 7, c.color, 6.2, padPaw)
+  + chunkyLegs(c.color, { top: 100, spread: 15, w: 15, foot: c.color, claw: '#eaffb4', clawN: 2 })
+  // pot-bellied torso with a real shoulder->hip break (was a second ball)
+  + p('M60 64 C74 64 82 76 82 90 C82 102 72 107 60 107 C48 107 38 102 38 90'
+    + ' C38 76 46 64 60 64 Z', c.color)
+  + ef(60, 92, 15, 12, '#dff3c8', 0.7)
+  + limb(40, 78, 27, 94, 9, c.color, 6.6, padPaw, 0.4)
+  + limb(80, 78, 93, 94, 9, c.color, 6.6, padPaw, 0.4)
   + ln('M48 26 C42 8 34 0 26 -4 M72 26 C78 8 86 0 94 -4', c.color, 4.6)
   + ef(25, -5, 5.4, 5.4, '#eaffb4') + ef(95, -5, 5.4, 5.4, '#eaffb4')
-  + e(60, 46, 28, 25, c.color)
-  + gloss(48, 33, 11, 7)
+  // SKULL: a wide crown with pointed side fins and a small tapered chin, so
+  // the head is a shape rather than a green ball behind two antennae
+  + p('M60 20 C78 20 90 32 90 44 C90 52 86 58 78 61'
+    + ' C72 63.5 68 66 60 66 C52 66 48 63.5 42 61 C34 58 30 52 30 44'
+    + ' C30 32 42 20 60 20 Z', c.color)
+  + p('M31 40 L16 34 L32 50 Z', c.color) + p('M89 40 L104 34 L88 50 Z', c.color)
+  + snout(60, 59, 8.5, 5.5, c.color, '#dff3c8')
+  + browRidge(60, 36, 11, 7.5, 4, c.color)
+  + gloss(48, 29, 11, 7)
   + ef(49, 46, 5.6, 6.2, '#2a3a6a') + ef(71, 46, 5.6, 6.2, '#2a3a6a')
   + ef(47.6, 44.2, 2.1, 2.3, '#fff') + ef(69.6, 44.2, 2.1, 2.3, '#fff')
-  + smile(60, 58, 6);
+  + ln('M55.4 59.6 q4.6 3.4 9.2 0', OUT, 2);
 
 /* -- JIGGLYPUFF : one balloon, no torso/head split, hair curl ------------- */
 POSE.jigglypuff = (c) => ''
@@ -1087,59 +1393,195 @@ POSE.jigglypuff = (c) => ''
   + ef(42, 65, 3, 3.2, '#ffffff') + ef(74, 65, 3, 3.2, '#ffffff')
   + smile(60, 90, 9) + ef(28, 84, 6.4, 5, '#f9a8c0', 0.8) + ef(92, 84, 6.4, 5, '#f9a8c0', 0.8);
 
-/* -- SQUIRTLE : the SHELL is the body - domed carapace, small head -------- */
+/* -- SQUIRTLE : the SHELL is the body - domed carapace, small head --------
+ * Round 8 audit: the shell carried the whole read and the creature inside it
+ * was a snoutless blue ball on two pebble legs. Now the skull path narrows at
+ * the cheeks into a projecting TURTLE BEAK (rounded upper lip, seam, chin),
+ * there is a brow shelf over the eyes, and the legs are `chunkyLegs` columns
+ * on broad webbed-toe feet.
+ */
 POSE.squirtle = (c) => ''
-  + p('M84 102 C104 98 106 78 98 68 C110 78 110 104 92 112 C84 114 82 108 84 102 Z', '#f2c48a')
-  + stubLegs(c.color, { top: 104, spread: 17, w: 17, foot: c.belly })
-  + e(60, 88, 36, 31, '#c9822f')
-  + ef(60, 88, 28, 23, '#f2c48a')
-  + [[60, 88], [42, 79], [78, 79], [46, 99], [74, 99]].map(([x, y]) =>
-    ln(`M${x} ${y - 8} l8 5 v9 l-8 5 l-8 -5 v-9 Z`, '#a86a20', 2.4)).join('')
-  + limb(30, 80, 14, 98, 8.5, c.color, 6, webHand) + limb(90, 80, 106, 98, 8.5, c.color, 6, webHand)
-  + e(60, 44, 29, 27, c.color)
-  + gloss(47, 31, 12, 7)
-  + ef(48, 42, 6.6, 7.6, '#ffffff') + ef(72, 42, 6.6, 7.6, '#ffffff')
-  + ef(49, 43, 3.2, 4.2, OUT) + ef(73, 43, 3.2, 4.2, OUT)
-  + ef(46, 39, 2.3, 2.3, '#fff') + ef(70, 39, 2.3, 2.3, '#fff')
-  + smile(60, 56, 8.5);
+  + p('M85 88 C105 84 108 64 100 54 C113 64 113 92 94 99 C86 101 83 94 85 88 Z', '#f2c48a')
+  + chunkyLegs(c.color, { top: 94, spread: 18, w: 19, foot: c.belly, claw: '#fdf3d6' })
+  + e(60, 78, 33, 27, '#c9822f')
+  + ef(60, 78, 25, 20, '#f2c48a')
+  + [[60, 78], [44, 70], [76, 70], [48, 88], [72, 88]].map(([x, y]) =>
+    ln(`M${x} ${y - 7.5} l7.5 4.7 v8.4 l-7.5 4.7 l-7.5 -4.7 v-8.4 Z`, '#a86a20', 2.4)).join('')
+  + limb(32, 72, 16, 92, 11, c.color, 7, webHand, 0.35)
+  + limb(88, 72, 104, 92, 11, c.color, 7, webHand, 0.35)
+  // SKULL: dome + cheeks pulling in to a beak root
+  + p('M32 34 C32 16 45 7 60 7 C75 7 88 16 88 34'
+    + ' C88 44 83 51 73 54 C68 55.5 52 55.5 47 54 C37 51 32 44 32 34 Z', c.color)
+  // BEAK: a short rounded upper lip projecting past the skull line, with a
+  // pale under-jaw and a hard seam where the two halves meet.
+  + snout(60, 56, 12.5, 10, c.color, c.belly)
+  + ln('M48.5 57.5 C53 62.5 67 62.5 71.5 57.5', OUT, 2.4)
+  + ln('M57 52.4 q1 1.3 1.9 0 M61.1 52.4 q1 1.3 1.9 0', OUT, 1.3)
+  + browRidge(60, 26, 12.5, 8, 4.4, c.color)
+  + gloss(47, 19, 12, 7)
+  + ef(48, 34, 6.6, 7.6, '#ffffff') + ef(72, 34, 6.6, 7.6, '#ffffff')
+  + ef(49, 35, 3.2, 4.2, OUT) + ef(73, 35, 3.2, 4.2, OUT)
+  + ef(46, 31, 2.3, 2.3, '#fff') + ef(70, 31, 2.3, 2.3, '#fff');
 
-/* -- CHARMANDER : chibi Charizard - big head, no wings, flame tail -------- */
+/* -- CHARMANDER ----------------------------------------------------------
+ * Round 8 fix - "a snoutless orange ball-head with hairline stick arms and
+ * pebble feet, identifiable only by its tail flame". The head is no longer a
+ * circle with a face printed on it:
+ *   - The SKULL PATH itself steps in at the cheeks and then projects forward
+ *     and DOWN into a rounded reptile muzzle, so the silhouette is a keyhole,
+ *     not a ball. The muzzle mass is replayed with `snout()` over the step so
+ *     the break line arcs cheek-to-cheek and the snout reads as sitting in
+ *     FRONT of the face plane.
+ *   - A real LOWER JAW: a wide jaw-hinge bump either side, a chin plate under
+ *     the mouth line, and two small upper fangs over the lip.
+ *   - A heavy BROW SHELF (`browRidge`) overhangs the eyes with a frown seam
+ *     between, so the eyes sit under bone instead of floating on a balloon.
+ *   - LIMBS are trunks, not hairlines: arms nearly half again as thick ending
+ *     in `claw3` paws, and `chunkyLegs` replaces the pebble-on-a-nub stubs
+ *     with thick knee'd columns on broad three-clawed feet.
+ * It stays clearly a CHILD of Charizard (no wings, no neck, oversized head,
+ * belly plate, tail torch) without becoming a shrunken copy of it.
+ */
 POSE.charmander = (c) => ''
-  + p('M80 104 C102 102 108 84 102 72 C112 84 108 108 88 114 C80 116 78 110 80 104 Z', c.color)
-  + pf('M102 74 C94 60 102 44 112 34 C110 50 120 52 122 42 C128 58 120 78 106 84'
-    + ' C102 81 103 78 102 74 Z', '#ffd63b')
-  + pf('M104 74 C99 62 104 50 111 42 C110 54 116 54 117 48 C121 60 116 72 108 77 Z', '#ff8e2b')
-  + stubLegs(c.color, { top: 104, spread: 16, w: 16, foot: c.belly })
-  + e(60, 90, 27, 25, c.color)
-  + ef(60, 96, 18, 15, c.belly)
-  + limb(36, 82, 22, 100, 7.5, c.color, 5.6, claw3) + limb(84, 82, 98, 100, 7.5, c.color, 5.6, claw3)
-  // big round head with a SHORT blunt muzzle drawn on the midline
-  + p('M31 42 C31 24 44 14 60 14 C76 14 89 24 89 42 C89 56 79 66 60 66'
-    + ' C41 66 31 56 31 42 Z', c.color)
-  // short rounded lizard muzzle - hairline nostril ticks, never dark discs
-  + snout(60, 53, 10, 7, c.color, c.belly)
-  + ln('M57.4 49.5 q1.1 1.5 2.1 0 M60.5 49.5 q1.1 1.5 2.1 0', OUT, 1.4)
-  + grin(60, 55, 6.5)
-  + gloss(46, 30, 13, 7.5)
-  + ef(48, 39, 5.8, 6.6, '#ffffff') + ef(72, 39, 5.8, 6.6, '#ffffff')
-  + ef(48.8, 40, 2.9, 3.7, OUT) + ef(72.8, 40, 2.9, 3.7, OUT)
-  + ef(46.6, 36.6, 1.6, 1.6, '#ffffff') + ef(70.6, 36.6, 1.6, 1.6, '#ffffff');
+  // TAIL: a thick root off the right hip that sweeps UP and clear of the arm,
+  // so the torch burns as its own separate flame in open air.
+  + p('M74 98 C98 98 110 78 102 60 C114 74 112 102 86 110 C75 112 72 104 74 98 Z', c.color)
+  + pf('M90 104 C98 98 104 86 102 76 C108 88 104 100 92 106 Z', c.accent)
+  + hot('M102 62 C94 48 102 32 112 22 C110 38 120 40 122 30 C128 46 120 66 106 72'
+    + ' C102 69 103 66 102 62 Z', '#ffd63b')
+  + hot('M104 62 C99 50 104 38 111 30 C110 42 116 42 117 36 C121 48 116 60 108 65 Z', '#ff8e2b')
+  // THICK knee'd legs on broad three-clawed feet (was: two pebbles on nubs)
+  + chunkyLegs(c.color, { top: 94, spread: 17, w: 19, foot: c.color, claw: '#fff0c2' })
+  // squat pear torso with a cream belly plate (top kept LOW so the jaw and the
+  // short neck are not swallowed by the chest)
+  + p('M60 71 C76 71 85 80 85 91 C85 101 74 105 60 105 C46 105 35 101 35 91'
+    + ' C35 80 44 71 60 71 Z', c.color)
+  + ef(60, 92, 17.5, 12.5, c.belly)
+  + ln('M48 89 C53 96 67 96 72 89', '#e0c89a', 1.6)
+  // TRUNK arms: heavy through the deltoid, ending in fat three-talon paws.
+  // Round-3 audit: still hairline-ish at podium scale, so the forearm and the
+  // paw both grew (w 12 -> 14.5, paw 8 -> 9.6) and the reach shortened so the
+  // mass reads instead of the taper.
+  + limb(41, 82, 25, 96, 14.5, c.color, 9.6, claw3, 0.34)
+  + limb(79, 82, 95, 96, 14.5, c.color, 9.6, claw3, 0.34)
+  // SKULL: a domed cranium whose lower silhouette PULLS IN at the cheeks and
+  // stops well above the chin, so the muzzle mass below it breaks the outline
+  // instead of being printed on a ball.
+  + p('M30 33 C30 14 43 4 60 4 C77 4 90 14 90 33'
+    + ' C90 43 85 49 76 51'          // right cheek falls back and in
+    + ' C70 52.5 50 52.5 44 51'      // narrow muzzle root (well inside the
+    //                                  muzzle's own width, so its top arc
+    //                                  crosses the face as a real break line)
+    + ' C35 49 30 43 30 33 Z', c.color)
+  // MUZZLE: a rounded reptile snout PROJECTING below AND wider than the skull's
+  // muzzle root. Its top arc is the break line that puts the snout in front of
+  // the face plane; the cream underside is the lower jaw.
+  // (round-3 audit: the muzzle was a WIDE FLAT band that read as a duck bill.
+  // It is now narrower than the cheeks and DEEPER, so it protrudes as a
+  // rounded reptile snout, with a second smaller nose-bridge mass stacked on
+  // its upper plane to give the profile a real step.)
+  + snout(60, 57, 12.6, 14, c.color, c.belly)
+  + ef(60, 49.5, 9.4, 5.2, c.color)
+  // jaw-hinge bumps either side of the muzzle root: the mandible corners
+  + ef(46.5, 50.5, 5, 3.8, c.color) + ef(73.5, 50.5, 5, 3.8, c.color)
+  // nostrils on the muzzle's top plane, forward-facing
+  + ef(56, 49.6, 1.7, 1.3, OUT) + ef(64, 49.6, 1.7, 1.3, OUT)
+  // mouth: a wide lizard lip with two small upper fangs over it, and a chin
+  // crease under it so the mandible has a front plane
+  + grin(60, 60, 8.4)
+  + teeth(60, 60.6, 5.4, 2)
+  + ln('M53.5 68 C56.5 70.4 63.5 70.4 66.5 68', '#dcbf90', 1.6)
+  // BROW SHELF over the eyes + frown seam, so the eyes sit under bone
+  + browRidge(60, 27, 12, 8, 4, c.color)
+  + gloss(46, 17, 12, 6.5)
+  + ef(48, 33.5, 6, 6.8, '#ffffff') + ef(72, 33.5, 6, 6.8, '#ffffff')
+  + ef(48.8, 34.5, 3, 3.9, OUT) + ef(72.8, 34.5, 3, 3.9, OUT)
+  + ef(46.4, 31, 1.7, 1.7, '#ffffff') + ef(70.4, 31, 1.7, 1.7, '#ffffff');
 
-/* -- BULBASAUR : squat quadruped, the BULB is the tallest thing ----------- */
-POSE.bulbasaur = (c) => ''
-  + quadLegs(c.color, { top: 104, xs: [24, 44, 76, 96], w: 17, foot: c.accent })
-  + p('M18 88 C24 66 40 56 60 56 C82 56 96 68 98 86 C100 98 82 104 58 104'
-    + ' C34 104 14 100 18 88 Z', c.color)
-  + [[38, 78], [56, 86], [80, 78], [66, 68]].map(([x, y]) => ef(x, y, 6.5, 4.8, c.accent, 0.8)).join('')
-  + e(62, 46, 26, 21, '#6fbf4a')
-  + p('M40 42 C46 16 78 16 84 42 C74 34 50 34 40 42 Z', '#8fd35f')
-  + ln('M46 46 C56 38 68 38 78 46 M52 40 C58 34 66 34 72 40', '#3f8a2c', 2.2)
-  + e(32, 82, 27, 24, c.color)
-  + gloss(22, 70, 10, 6)
-  + ef(23, 80, 5.6, 6.4, '#e8433c') + ef(43, 80, 5.6, 6.4, '#e8433c')
-  + ef(23, 80, 2.7, 3.6, OUT) + ef(43, 80, 2.7, 3.6, OUT)
-  + ln('M14 92 q9 7 18 0', OUT, 2.4)
-  + p('M12 62 L2 46 L24 60 Z', c.color) + p('M50 60 L60 44 L44 56 Z', c.color);
+/* -- BULBASAUR : squat three-quarter quadruped, the BULB is the tallest thing
+ * Round 9 audit - "the worst figure on the podium: a mint ball head with a
+ * printed smile, one lone spike, four identical pill legs, and a plain green
+ * blob that is the only thing saying Bulbasaur". Rebuilt like Charmander was:
+ *   - The SKULL PATH steps IN at the muzzle root and the toad MUZZLE projects
+ *     forward-left clear of the forehead, with a nostril pair on its top plane,
+ *     a pale under-jaw and a hard jaw/mouth seam - so the head is a wedge with
+ *     a snout on it, not a circle with a face printed on it.
+ *   - A BROW SHELF over the red eyes, and TWO symmetrical pointed EAR-FINS
+ *     rooted on the crown (was: one stray spike floating off the temple).
+ *   - LEGS are `stoutQuadLegs`: tapered knee'd columns on broad three-clawed
+ *     feet, near pair heavier than the far pair (was: four identical pills).
+ *   - The BULB is a real bulb: a segmented dome with meridian seams, a base
+ *     collar seam where it meets the back, and a LEAF SPROUT crowning it - so
+ *     the species read is spread across head, legs and bulb, not carried by
+ *     one accessory.
+ */
+POSE.bulbasaur = (c) => {
+  const bulbDark = '#4f9a34';
+  const bulbLit = '#7ec24a';
+  const bulbSeam = '#2f6b1f';
+  const leaf = '#96d45c';
+  const leafLit = '#b6e57c';
+  const jaw = '#a9e2cd';
+  return ''
+    // FOUR MASSIVE LEGS: knee'd columns on broad three-clawed feet
+    + stoutQuadLegs(c.color, {
+      top: 100, xs: [26, 47, 76, 97], w: 18, claw: '#f6fbe0', far: '#54a48f',
+    })
+    // squat toad barrel, haunch higher than the shoulder
+    + p('M18 88 C24 66 40 56 60 56 C82 56 96 68 98 86 C100 98 82 105 58 105'
+      + ' C34 105 14 100 18 88 Z', c.color)
+    + [[40, 78], [58, 88], [82, 78], [70, 66]].map(([x, y]) => ef(x, y, 6.8, 5, c.accent, 0.8)).join('')
+    // ---------------------------------------------------------------- BULB
+    // a segmented dome: dark shell, lit crown, three meridian seams and the
+    // collar seam where the shell is seated into the back
+    + e(74, 50, 26, 23, bulbDark)
+    + pf('M50 46 C52 28 64 21 74 21 C86 21 96 30 97 46 C90 36 58 36 50 46 Z', bulbLit)
+    + ln('M60 28 C54 40 53 54 57 66', bulbSeam, 2.3)
+    + ln('M74 23 C72 38 72 54 74 70', bulbSeam, 2.3)
+    + ln('M88 28 C94 40 95 54 91 66', bulbSeam, 2.3)
+    + ln('M51 56 C60 66 88 66 97 56', bulbSeam, 2.1)
+    + gloss(62, 34, 11, 6)
+    // LEAF SPROUT crowning the bulb: two broad blades with midribs plus a
+    // small upright shoot, seated on a stem knot
+    + p('M70 26 C58 18 46 12 34 11 C40 22 54 32 68 32 Z', leaf)
+    + ln('M38 13 C50 20 60 26 66 30', bulbSeam, 1.6)
+    + p('M78 26 C90 18 102 12 114 11 C108 22 94 32 80 32 Z', leaf)
+    + ln('M110 13 C98 20 88 26 82 30', bulbSeam, 1.6)
+    + p('M74 24 C71.5 16 72.5 10 75 5 C80 11 79.5 19 78 25 Z', leafLit)
+    + e(74, 27, 6.6, 4.8, bulbSeam)
+    // ---------------------------------------------------------------- HEAD
+    // SKULL: a wedge - crown over the top, forehead dropping to a STEP at the
+    // muzzle root, then the cheek swelling back out and down to the jaw hinge.
+    + p('M64 84 C64 65 52 55 38 55 C25 55 16 63 15 73'
+      + ' C14.5 79 18 82 23 83'         // step IN: the muzzle root
+      + ' C19 88 20 97 29 101'          // cheek back out, down to the jaw
+      + ' C38 105 57 103 63 96'
+      + ' C65.5 92 64 88 64 84 Z', c.color)
+    // MUZZLE: a big rounded toad snout projecting a clear 13 units past the
+    // forehead. Its upper arc is the break line that puts it in FRONT of the
+    // face plane instead of printed on it.
+    + p('M24 74 C11 69 2 76 2 86 C2 96 15 101 26 97 C34 93 33 78 24 74 Z', c.color)
+    // pale under-jaw + the hard mouth seam between the halves
+    + pf('M3.5 88 C6 96 21 100 29 93 C21 96 9 95 3.5 88 Z', jaw)
+    + ln('M3 87 C9 95 22 96 29.5 90', OUT, 2.5)
+    + ln('M13 96.4 q3 2 6 1', OUT, 1.5)
+    // nostril pair on the muzzle's top plane
+    + ef(7.6, 80.6, 1.8, 1.35, OUT) + ef(14.6, 77.8, 1.8, 1.35, OUT)
+    // jaw-hinge bump where the mandible meets the skull
+    + ef(30, 97, 5.4, 4, c.color)
+    // EAR-FINS: a matched pointed pair rooted on the crown, each with a darker
+    // inner fin - one sweeping out over the muzzle side, one standing up
+    + p('M15 66 C10 56 9 48 9 41 C18 46 27 51 33 57 Z', c.color)
+    + pf('M16 60 C14 54 14 49 14.5 45 C20 49 25 53 28.5 56.5 Z', c.accent)
+    + p('M35 58 C39 48 43 41 48 35 C51 44 52 53 51 61 Z', c.color)
+    + pf('M37.5 56 C40 50 42.5 46 45.5 42 C47.5 48 48 54 47.5 58.5 Z', c.accent)
+    // BROW SHELF over the eyes, then the red eyes themselves
+    + gloss(31, 66, 11, 6)
+    + browRidge(36, 72.5, 11.5, 7.2, 3.4, c.color)
+    + ef(25, 79, 5.4, 6.2, '#e8433c') + ef(47.5, 80, 5.4, 6.2, '#e8433c')
+    + ef(25.6, 79.8, 2.6, 3.5, OUT) + ef(48.1, 80.8, 2.6, 3.5, OUT)
+    + ef(23, 76.4, 1.7, 1.7, '#ffffff') + ef(45.5, 77.4, 1.7, 1.7, '#ffffff');
+};
 
 /* -- DITTO : no limbs, no face structure - a slumped puddle --------------- */
 POSE.ditto = (c) => ''

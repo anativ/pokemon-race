@@ -17,6 +17,7 @@ import { buildRoad } from '../geometry.js';
 import { createCamera, updateCamera } from '../camera.js';
 import { projectRoad, placeAt, CAM_BACK } from '../projection.js';
 import { getItem } from '../items.js';
+import { makeFrame } from '../kart3d.js';
 import * as paint from './draw.js';
 
 const STAGE_W = 1600;
@@ -131,6 +132,18 @@ const HUD_ZONES = Object.freeze([
   { x: 20, y: 762, w: 320, h: 138 },     // "Lap n/3" pill
   { x: 1236, y: 452, w: 364, h: 448 },   // minimap, standings tokens, logo
 ]);
+
+/**
+ * Does a circle reach into the HUD safe zones AS THEY ARE CLIPPED (inflated by
+ * 24 px for the world's corner roll)? A flame whose impact lands in there is cut
+ * off short of its victim, so it must not be drawn as a terminating plume.
+ */
+function hudBlocked(x, y) {
+  for (const z of HUD_ZONES) {
+    if (x > z.x - 24 && x < z.x + z.w + 24 && y > z.y - 24 && y < z.y + z.h + 24) return true;
+  }
+  return false;
+}
 
 /** How much of a circle's bounding box lands inside a HUD zone (0..1). */
 function hudCover(x, y, r) {
@@ -343,35 +356,180 @@ function drawKartFx(view3, race, w, h, t, occ) {
 // rival directly ahead - the Charizard fire-breath of the reference item
 // panel - rather than a lance that leaves the road and crosses the frame.
 
-// The muzzle sits on the FRONT LIP of the hero's own hood - ahead of the
-// rider, never on their chest or face. Measured against the kart projector
-// (src/race/kart3d.js): with `s` = half the body width, the rear contact patch
-// is at 0, the hood's front lip lands near -1.10 s and the rider's head fills
-// -1.20 s .. -2.05 s, biased to +0.33 s by the chase yaw. So the muzzle is
-// lifted a hair past the lip and parked on the hood corner the flame is
-// heading for, so the cone never has to cross the character to reach its
-// victim (the sign of JET_NOSE_DX is flipped per shot, see `side` below).
-const JET_NOSE_LIFT = 1.14;  // muzzle height above the ground point, in kart sizes
-// Pushed well out onto the hood CORNER on the target's side. The rider sits
-// slightly right of the kart's centre line, and a muzzle parked underneath them
-// leaves the widest, densest part of the cone - its mouth - hidden behind the
-// character; out on the corner the whole taper is on screen.
-// The chase yaw (kart3d draws the hero at yaw 0.17) slides the whole kart body
-// about +0.28 s right of its ground anchor, and the rider with it. The mouth is
-// therefore parked just LEFT of the kart's own centre line: still squarely on
-// the hood, still a kart wide, but with its densest half running up the clear
-// side of the character rather than haloing their head.
-const JET_NOSE_DX = 0.00;    // muzzle offset across the hood, away from the rider
-// WIDEST AT THE MUZZLE, at roughly the firing kart's own width, closing to the
-// VICTIM's width where it lands. That is the only taper in the effect and it is
-// the perspective-correct one: a constant-width breath of fire seen from behind
-// is broad on our own nose and no wider than the chassis it terminates on.
-const JET_NOSE_W = 0.96;     // half width AT the muzzle, in firer-kart sizes
-const JET_TIP_W = 0.86;      // half width at the impact, in VICTIM-kart sizes
-const JET_FREE_RUN = 120;    // forward run (world units) when nothing is in range
+// WHERE THE FLAME LEAVES THE KART.
+//
+// Not the projected nose of the mesh. The karts are drawn at a deliberately
+// exaggerated three-quarter yaw (src/race/kart.js pushes them up to ~1 rad off
+// the road so they are never head-on), so the hood tip can project 200 px to the
+// camera-LEFT on the very frame the victim sits up-RIGHT. A mouth welded to that
+// tip fires a lance across the kart's own flank and straight through the rider -
+// which is exactly what read as "breathed out of the rider's back".
+//
+// So the mouth is anchored on the FIRING AXIS instead: start at the firer's
+// contact patch, step forward along the line to the victim by about one half-body
+// width, and sit just off the tarmac. That point is always on the kart's leading
+// edge in the direction the fire is going, whatever the mesh is doing, and it is
+// always LOW - which is what lets the plume pass under the seated rider instead
+// of across their chest.
+const NOSE_OUT = 1.02;       // mouth: half-widths forward along the firing axis
+const ROOT_BACK = 0.34;      // root buried back inside the bodywork, same units
+const JET_MOUTH = 0.25;      // mouth radius, in hero half-widths
+/** Vertical squash of the plume - must match `flat` in draw.js `flameCone`. */
+const CONE_FLAT = 0.62;
+/**
+ * How far clear of the rider silhouette the DRAWN flame has to stay, as a
+ * multiple of the (inflated) silhouette: 1.0 is grazing it. Anything less and the
+ * rider cut-out bites a curved chunk out of the plume, which reads as fire coming
+ * out of the character rather than out of the kart.
+ */
+const JET_CLEAR = 1.02;
+/**
+ * ...and how close it may come before the plume is cut short rather than drawn.
+ * Lower than the target above because the silhouette used here is the projected
+ * character's bounding ellipse, which is already a shade larger than the ellipse
+ * actually cut out of the flame - so a hair of overlap on this measure is still
+ * clear air on screen.
+ */
+const JET_CUT = 0.93;
+/**
+ * Longest a cone may run on screen, in stage widths. A plume past this is a lance
+ * across the whole frame rather than a breath of fire.
+ */
+const JET_MAX_RUN = 0.46 * STAGE_W;
+/** Frame margin the impact must sit inside, in stage widths/heights. */
+const JET_EDGE = 0.045;
+const JET_TIP_W = 0.80;      // half width at the impact, in VICTIM-kart sizes
+const JET_TIP_MIN = 0.55;    // tip may never pinch below this share of the mouth
+const JET_TIP_MAX = 1.70;    // ...nor bloom past this share of it
+const JET_BURST = 0.72;      // dry-fire burst length, in hero half-widths
+const BURST_OUT = 0.52;      // burst mouth: half-widths forward along its axis
+/**
+ * Where on the kart the fire may leave from, in kart-local units (x right, y up,
+ * z towards the nose; ground at y = 0, the hull's front ground line is z ~ 1.0 and
+ * |x| <= 0.86). Every one of them is a point on the chassis's own leading edge, at
+ * the TARMAC - so wherever the plume ends up leaving from it is welded to the
+ * bodywork and passes under the rider. Centre first; the corners exist only to
+ * walk the cone out from behind the character when the victim is drawn almost
+ * straight above them, and they are deliberately no wider than the front axle so
+ * the fire can never look like it is coming out of the flank.
+ */
+const FRONT_PTS = Object.freeze([
+  [0, 0.07, 1.12],
+  [0.44, 0.05, 1.04], [-0.44, 0.05, 1.04],
+  [0.76, 0.03, 0.94], [-0.76, 0.03, 0.94],
+]);
+/**
+ * Yaws (radians) a muzzle burst may be swung off the road axis to get clear of
+ * the firer's own rider. Small on purpose - the puff still has to read as fire
+ * breathed forwards, not sideways out of the flank.
+ */
+const BURST_YAW = Object.freeze([0, 0.16, -0.16, 0.32, -0.32]);
+/** Widest the burst may lean off screen-up to follow the circuit (radians). */
+const BURST_LEAN = 0.22;
 const JET_MIN_GAP = 66;      // below this the rival is not drawn clear of us
 const JET_LOCK_LANE = 1.30;  // lane half-window the jet can lock onto
-const JET_MIN_RUN = 155;     // shortest the cone may be on screen (px)
+const JET_MIN_RUN = 170;     // shortest a cone WITH a victim may be (px)
+const JET_ROAD_FALLBACK = 300; // gap (world units) an undrawn victim is still burnt at
+// The rider silhouette the flame has to pass under, as an ellipse on the head
+// plane: head + shoulders + chest, i.e. every pixel of the character the cone
+// could otherwise smear across. It is cut out of the flame (never out of the
+// kart) because the rider is NEARER the camera than the road the fire runs down -
+// but the geometry above is chosen so that cut-out never actually has anything to
+// remove.
+const RIDER_Z = -0.30;
+const RIDER_Y = 1.40;
+const RIDER_RX = 0.46;
+const RIDER_RY = 0.68;
+
+/**
+ * The projector the firing kart is DRAWN with, so the flame can be pinned to
+ * real points on the mesh instead of to guessed multiples of the sprite box.
+ * Mirrors src/race/kart.js (`drawKart`) and its callers in src/race/world.js:
+ * the hero is presented at yaw 0.17 plus its steer, a rival at a yaw that
+ * follows how far off centre it sits, and both are pushed through the same
+ * "never head-on" boost.
+ *
+ * Returns `{ at(x,y,z), unit(z) }`: kart-local point -> STAGE pixels, and the
+ * apparent pixels-per-kart-unit at a given depth.
+ */
+function kartRig(r, from, w) {
+  let base = 0.17;
+  let steer = 0;
+  let pitch = 0;
+  if (r.isPlayer) {
+    steer = clamp((cam.yaw * 1.9 + (r.lane - cam.lane) * 1.4) * 3.1, -1, 1);
+    pitch = clamp(-(cam.speedT || 0) * 0.02 + (r.boost || 0) * 0.05, -0.06, 0.06);
+  } else {
+    base = 0.10 + ((from.x - w / 2) / w) * 0.55;
+    steer = clamp(r.lane * 0.5, -0.7, 0.7);
+  }
+  const drift = clamp(r.drift || 0, 0, 1);
+  const raw = base + steer * 0.42 + drift * Math.sign(steer || 1) * 0.18;
+  const yaw = clamp(raw + 0.20 * Math.tanh(raw / 0.10), -0.98, 0.98);
+  const roll = clamp(-steer * 0.13, -0.20, 0.20);
+  const frame = makeFrame(from.s, { yaw, roll, pitch });
+  return {
+    at(x, y, z) {
+      const q = frame.p(x, y, z);
+      return { x: from.x + q.x, y: from.y + q.y };
+    },
+    unit(z) { return frame.unit(z); },
+  };
+}
+
+/**
+ * Add an ellipse that lives on one kart-local plane to the current path, as the
+ * projected polygon it really is (yaw and roll shear it on screen, so a screen
+ * -space ellipse would sit crooked on a hard-steering kart).
+ */
+function tracePlaneEllipse(c, rig, cy, z, rx, ry, seg = 22) {
+  for (let i = 0; i <= seg; i++) {
+    const a = (i / seg) * Math.PI * 2;
+    const p = rig.at(Math.cos(a) * rx, cy + Math.sin(a) * ry, z);
+    if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y);
+  }
+  c.closePath();
+}
+
+// Corners of the firing kart's own hull, in kart-local units: the lofted body's
+// widest rings (nose, hips, tail) at deck height and at the ground line. Their
+// screen convex hull is our bodywork, which stands between the camera and the
+// mouth of the flame.
+const HULL_PTS = Object.freeze([
+  [0, 0.58, 1.44], [-0.30, 0.50, 1.42], [0.30, 0.50, 1.42],
+  [-0.72, 0.77, 0.86], [0.72, 0.77, 0.86],
+  [-0.80, 0.94, -0.46], [0.80, 0.94, -0.46],
+  [-0.74, 1.01, -0.98], [0.74, 1.01, -0.98],
+  [-0.36, 0.86, -1.22], [0.36, 0.86, -1.22],
+  [-0.86, 0.02, -1.10], [0.86, 0.02, -1.10],
+  [-0.86, 0.02, 0.90], [0.86, 0.02, 0.90],
+]);
+
+/** The firing kart's projected body silhouette, as a convex polygon. */
+function kartHull(rig) {
+  const pts = HULL_PTS.map((p) => rig.at(p[0], p[1], p[2]));
+  pts.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  const cross = (o, a, bb) => (a.x - o.x) * (bb.y - o.y) - (a.y - o.y) * (bb.x - o.x);
+  const half = (list) => {
+    const out = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    return out;
+  };
+  const lower = half(pts);
+  const upper = half(pts.slice().reverse());
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+/** Add the firing kart's projected body silhouette (convex hull) to the path. */
+function traceKartHull(c, rig) {
+  const hull = kartHull(rig);
+  if (hull.length < 3) return;
+  hull.forEach((p, i) => { if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y); });
+  c.closePath();
+}
 
 /**
  * The kart the jet is burning: the nearest rival ahead of the firer, inside the
@@ -385,6 +543,10 @@ function beamTarget(race, b, owner) {
   // Kept for the beam's WHOLE life, however close we then ram them: the kart
   // the sim burned is the kart the flame has to be drawn ending on, and
   // re-picking mid-burn is what left the plume pointing at a bystander.
+  // A DRY shot stays dry: the sim fired it with nobody in front, so there is no
+  // victim to find and the plume must not go hunting for one (a burst that turns
+  // into a cone two frames later is worse than either).
+  if (b.dry) return null;
   if (b.target) {
     const o = race.racers.find((r) => r.id === b.target);
     const g = o ? gapTo(race.lapLen, owner.dist, o.dist) : 0;
@@ -403,132 +565,376 @@ function beamTarget(race, b, owner) {
 }
 
 /**
- * Build the plume: a ground-level flame cone that leaves the firer's nose at
- * road height, follows the tarmac forward (so it bends with the circuit and
- * never leaves the road plane) and terminates ON the struck kart.
- *
- * Returns `{ sp, tip }` where `sp` is the spine (`{x,y,w}` screen points) and
- * `tip` is the impact anchor, or `null` if nothing can be drawn this frame.
+ * Per-beam cosmetic memory. Which SHAPE a shot is (a cone onto a victim or a
+ * muzzle burst off the nose) comes straight from the sim's own verdict, and the
+ * mouth it leaves from is kept between frames while it still works - so one shot
+ * can
+ * never swing from a stub into a lance half a beat later, which is what made the
+ * effect read as two unrelated animations stitched together.
  */
-function beamPlume(view3, race, b, owner, from, lock, w, h) {
-  const fromZ = from.dz;
+const plumeMem = new WeakMap();
+function memOf(b) {
+  let m = plumeMem.get(b);
+  if (!m) { m = { end: null, shift: null, cone: null }; plumeMem.set(b, m); }
+  return m;
+}
 
-  // ------------------------------------------------------------ end points
+/** Repaint a remembered cone, with only its animation clock moved on. */
+function reCone(prev, b) {
+  return { ...prev, cone: { ...prev.cone, clock: b.life } };
+}
+
+/**
+ * Build the plume: a ground-hugging flame cone that leaves the firer's leading
+ * edge, runs down the tarmac and terminates ON the struck kart - or, for a shot
+ * fired with nobody in front, a short muzzle burst off the same anchor.
+ *
+ * Returns `{ cone, dz, tip, dry, target, clear }`; `cone` is the one shape that
+ * gets painted (flat near edge on the kart's nose -> round cap on the victim).
+ */
+function beamPlume(view3, race, b, from, lock, w, h, rig) {
+  const fromZ = from.dz;
+  const mem = memOf(b);
+  const s = from.s;
+  // The firing anchors: real points on the front of the chassis at road level,
+  // projected through the kart's own rig. Everything else is measured forward from
+  // one of them ALONG the axis of the shot, so the mouth is always on the kart's
+  // leading edge in the direction the fire is travelling, and always low enough to
+  // pass under the seated rider. `base` is the middle of the front - the default,
+  // and the one a shot uses unless the rider is in the way.
+  const anchors = FRONT_PTS.map((q) => rig.at(q[0], q[1], q[2]));
+  const base = anchors[0];
+  const mouthW = clamp(s * JET_MOUTH, 14, 52);
+
+  // ------------------------------------------------- the rider silhouette
   //
-  // BOTH ends come from what the renderer actually PUT on screen - the firer's
-  // own sprite box and the victim's sprite box - never from a road sample taken
-  // at the hero's own depth. At CAM_BACK the tarmac projects far below the
-  // viewport, and welding a spine onto that is what used to send the plume
-  // diving off the bottom of the frame behind the player.
+  // Projected through the kart's own rig and then taken as its screen bounding
+  // box: the cut-out this layer applies is the sheared ellipse itself, and its
+  // bounding ellipse is a slightly generous stand-in - erring outwards costs a
+  // few pixels of clearance and buys a plume that is never bitten into.
+  const rc = rig.at(0, RIDER_Y, RIDER_Z);
+  const rEdge = rig.at(RIDER_RX, RIDER_Y, RIDER_Z);
+  const rTop = rig.at(0, RIDER_Y + RIDER_RY, RIDER_Z);
+  const RX = Math.max(8, Math.hypot(rEdge.x - rc.x, rTop.x - rc.x));
+  const RY = Math.max(8, Math.hypot(rEdge.y - rc.y, rTop.y - rc.y));
+
+  /** < 1 => flame pixels of radius `r` at `p` land on the character. */
+  function ridePix(p, r) {
+    const dx = (p.x - rc.x) / (RX + r);
+    const dy = (p.y - rc.y) / (RY + r * CONE_FLAT);
+    return Math.hypot(dx, dy);
+  }
+  /** Closest the DRAWN flame gets to the rider, in inflated-silhouette radii. */
+  function coneClear(a, ra, z, rz) {
+    let worst = 9;
+    for (let i = 0; i <= 14; i++) {
+      const f = i / 14;
+      worst = Math.min(worst, ridePix(
+        { x: a.x + (z.x - a.x) * f, y: a.y + (z.y - a.y) * f },
+        ra + (rz - ra) * f,
+      ));
+    }
+    return worst;
+  }
+  /**
+   * Root / mouth of a cone fired towards `to` out of anchor `mouthAt` (an index
+   * into FRONT_PTS). Walking that index out to a front corner is what gets the
+   * plume from behind the rider when the victim is drawn almost straight above
+   * them, WITHOUT letting go of the victim or leaving the bodywork.
+   */
+  function axisTo(to, outward = NOSE_OUT, mouthAt = 0) {
+    const anchor = anchors[mouthAt] || anchors[0];
+    const dx = to.x - anchor.x;
+    const dy = to.y - anchor.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    // THE ONE INVARIANT: the mouth never rises above the rider's lower edge. The
+    // whole point of a low anchor is that the fire leaves the kart UNDER the
+    // character, so on a steep axis the mouth is pulled back DOWN the axis rather
+    // than lifted into their lap - which is what put the near end of the plume at
+    // chest height and made it read as breathed out of the rider's torso.
+    let out = s * outward;
+    const floorY = rc.y + RY + s * 0.05;
+    if (uy < -0.05 && anchor.y + uy * out < floorY) {
+      out = clamp((floorY - anchor.y) / uy, s * 0.26, out);
+    }
+    const back = out - s * ROOT_BACK;
+    return {
+      ux, uy, len: Math.max(1, len - out),
+      mouth: { x: anchor.x + ux * out, y: anchor.y + uy * out },
+      root: { x: anchor.x + ux * back, y: anchor.y + uy * back },
+    };
+  }
+
+  // --------------------------------------------------------- the DRY shot
   //
-  // The victim's ROAD point is the anchor of record. Its sprite refines it when
-  // the renderer is drawing it, but the renderer shoulders (and sometimes
-  // drops) a rival that intersects the hero, and a kart the beam just slowed
-  // slides in and out of that band - which is exactly how the plume used to
-  // snap back to a free-run stub half a second after firing.
+  // Fired with nobody in front (the player is leading, or the only rivals are
+  // behind): the item is spent, and the honest read of that is a MUZZLE BURST - a
+  // short puff of fire off the nose that blooms and dies, about one kart width
+  // long - not a full plume laid down the road onto empty tarmac.
+  function dryBurst() {
+    // Forward is "from the kart to the tarmac a few kart lengths up its own lane"
+    // - so the puff follows the circuit through a bend, and is always aimed UP the
+    // road rather than off the mesh's exaggerated three-quarter yaw. (A direction
+    // taken between two road samples instead is nearly horizontal at this depth,
+    // which is what made the burst read as fire out of the flank.)
+    let ax = 0;
+    let ay = -1;
+    const up = placeWorld(view3, fromZ + 260, b.lane);
+    if (up) {
+      // ...and LEANED, not aimed: on a hard bend that tarmac sits far out to one
+      // side, and a puff fired straight at it reads as fire breathed out of the
+      // flank. The heading is clamped to a shallow angle off screen-up, which is
+      // the direction "forwards" reads as from behind the kart.
+      const lean = clamp(Math.atan2(up.x - base.x, Math.max(1, base.y - up.y)), -BURST_LEAN, BURST_LEAN);
+      ax = Math.sin(lean);
+      ay = -Math.cos(lean);
+    }
+    // Blooms out of the hood over the first frames, then holds: a puff, not a jet.
+    const run = s * JET_BURST * (0.6 + 0.4 * clamp(b.life / 0.08, 0, 1));
+    let best = null;
+    // Only the middle of the front and the two inner corners: a short puff has no
+    // long axis to read a direction off, so one hung out on a front CORNER just
+    // looks like a fireball beside the flank.
+    for (let ai = 0; ai < Math.min(3, anchors.length); ai++) {
+      for (const rot of BURST_YAW) {
+        const cs = Math.cos(rot);
+        const sn = Math.sin(rot);
+        const ux = ax * cs - ay * sn;
+        const uy = ax * sn + ay * cs;
+        const from0 = anchors[ai];
+        const a = axisTo({ x: from0.x + ux * 600, y: from0.y + uy * 600 }, BURST_OUT, ai);
+        const tip = { x: a.mouth.x + ux * run, y: a.mouth.y + uy * run };
+        const clear = coneClear(a.mouth, mouthW, tip, mouthW * 1.3);
+        // Straight ahead out of the middle of the front is the shot; the corners
+        // and the small yaws exist only to keep the puff off the rider.
+        const cost = Math.max(0, JET_CLEAR - clear) * 10 + Math.abs(rot) + ai * 0.42;
+        if (!best || cost < best.cost) best = { a, tip, clear, cost };
+      }
+    }
+    // ...and if even the shortest lean cannot clear the character (they are
+    // leaning across the hood on a hard turn), the puff is shortened until it
+    // does: a stub of fire at the nose beats fire painted over the rider.
+    let tip = best.tip;
+    for (let i = 0; i < 5 && coneClear(best.a.mouth, mouthW, tip, mouthW * 1.3) < JET_CUT; i++) {
+      tip = { x: best.a.mouth.x + (tip.x - best.a.mouth.x) * 0.7, y: best.a.mouth.y + (tip.y - best.a.mouth.y) * 0.7 };
+    }
+    return {
+      cone: {
+        x0: best.a.root.x, y0: best.a.root.y, r0: mouthW,
+        x1: tip.x, y1: tip.y, r1: mouthW * 1.3,
+        clock: b.life,
+      },
+      dz: fromZ + 40,
+      tip: null,
+      dry: true,
+      target: null,
+      clear: coneClear(best.a.mouth, mouthW, tip, mouthW * 1.3),
+    };
+  }
+
+  // ------------------------------------------------------------ the victim
+  //
+  // The anchor of record is the victim's own sprite box; when the renderer is not
+  // drawing that kart (it shoulders, and sometimes drops, a rival that intersects
+  // the hero) the patch of road it is standing on stands in, so the plume keeps
+  // terminating on the kart the sim is actually burning instead of snapping back
+  // to a stub for a few frames.
   let hitAt = null;
   if (lock) {
     const dz = Math.max(fromZ + 24, fromZ + lock.gap);
-    const on = placeWorld(view3, dz, lock.racer.lane);
     const at = placeRacer(view3, race, lock.racer, w, h);
-    if (at && at.dz > fromZ + 18 && at.s > 5) {
-      hitAt = { x: at.x, y: at.y, s: at.s, dz: at.dz };
-    } else if (on) {
-      // not drawn this frame - burn the patch of road it is standing on
-      hitAt = { x: on.x, y: on.y, s: Math.max(14, on.w * 0.15), dz };
+    const on = placeWorld(view3, dz, lock.racer.lane);
+    if (at && at.dz > fromZ + 18 && at.s > 12) {
+      hitAt = { x: at.x, y: at.y, s: at.s, dz: at.dz, src: 'kart' };
+    } else if (on && lock.gap < Math.max(JET_ROAD_FALLBACK, (b.reach || 360) * 1.2)) {
+      hitAt = { x: on.x, y: on.y, s: Math.max(16, on.w * 0.15), dz, src: 'road' };
     }
   }
 
-  let end;
-  let toZ;
-  let endW;
+  // Frame + length guards: an impact off the stage, or a run stretched into a
+  // lance right across it, is clamped back down the axis. A victim that far out is
+  // a speck anyway - what matters is that the plume stays a plume.
   if (hitAt) {
-    // dead centre of the victim's chassis: the flame goes INTO the kart
-    // mid-chassis, not the roof: a flatter run keeps the cone on the road
-    // plane and out of the hero rider's face on its way there.
-    end = { x: hitAt.x, y: hitAt.y - hitAt.s * 0.60 };
-    toZ = hitAt.dz;
-    // target-SIZED: the mouth of fire closes down to roughly the struck kart's
-    // own width, so the far cap WRAPS that chassis - the flame swallows it
-    // instead of stopping short of it or ballooning past it.
-    endW = clamp(hitAt.s * JET_TIP_W, 16, 86);
-  } else {
-    toZ = fromZ + JET_FREE_RUN;
-    const road = placeWorld(view3, toZ, b.lane);
-    if (!road) return null;
-    end = { x: road.x, y: road.y - road.w * 0.05 };
-    // never thins to a needle: with nothing to burn the flame still has to end
-    // in a ball of fire rolling over the tarmac
-    endW = clamp(road.w * 0.045, 18, 44);
+    hitAt = {
+      ...hitAt,
+      x: clamp(hitAt.x, STAGE_W * JET_EDGE, STAGE_W * (1 - JET_EDGE)),
+      y: clamp(hitAt.y, STAGE_H * JET_EDGE, STAGE_H * (1 - JET_EDGE)),
+    };
+    const run0 = axisTo(hitAt).len;
+    if (run0 > JET_MAX_RUN) {
+      const k = (JET_MAX_RUN + s * NOSE_OUT) / (run0 + s * NOSE_OUT);
+      hitAt = {
+        ...hitAt,
+        x: base.x + (hitAt.x - base.x) * k,
+        y: base.y + (hitAt.y - base.y) * k,
+      };
+    }
   }
-  // ------------------------------------------------------------ the muzzle
-  //
-  // Pinned to the PROJECTED NOSE of the firing kart, on its centre line. Against
-  // the kart projector (src/race/kart3d.js), with `s` = half the body width the
-  // rear contact patch is at 0 and the hood's front lip lands near -1.10 s, so
-  // the cone's mouth is parked just past the lip and nudged a touch towards the
-  // target. Everything at or below the lip is our own chassis and is clipped out
-  // of the cone in `drawOrdnance`, so the flame reads as leaving the nose rather
-  // than as a flare stuck on the flank or the rear deck.
-  // ...and slid along the hood to the CORNER on the victim's side. The rider
-  // sits on the kart's centre line (which the chase yaw parks about +0.26 s
-  // right of the ground anchor) and the cone has to pass them to reach anything
-  // up the road; starting from the corner keeps the character on ONE edge of
-  // the cone instead of dead in its middle, where the cut-out that hides them
-  // splits the flame into two slivers.
-  const riderX = from.x + from.s * 0.26;
-  const face = end.x >= riderX ? 1 : -1;
-  const muzzle = {
-    x: clamp(riderX + from.s * (JET_NOSE_DX + 0.56 * face),
-      from.x - from.s * 0.58, from.x + from.s * 1.06),
-    y: from.y - from.s * JET_NOSE_LIFT,
-  };
 
-  // Burning a kart makes us close on it fast, so by the end of the burn the
-  // victim can be alongside rather than up the road. The cone follows it there
-  // (a flame that let go of its victim is exactly what read as "unconnected"),
-  // but it is never allowed to collapse into a stub on our own bumper: if the
-  // run gets too short the impact is pushed back out along the same heading.
-  let dx = end.x - muzzle.x;
-  let dy = end.y - muzzle.y;
-  let len = Math.hypot(dx, dy);
-  if (len < JET_MIN_RUN) {
-    if (len < 1) { dx = 0; dy = -1; len = 1; }
-    const k = JET_MIN_RUN / len;
-    end = { x: muzzle.x + dx * k, y: muzzle.y + dy * k };
-    len = JET_MIN_RUN;
+  // Candidate impacts on the victim's chassis, best first: dead centre and low
+  // (the flame goes INTO the chassis, not over its roof), then slid onto either
+  // flank, then down onto its wheels. Sliding along the chassis is how the cone
+  // gets clear of our own rider without ever letting go of its victim.
+  let pick = null;
+  if (hitAt) {
+    const tip0 = clamp(hitAt.s * JET_TIP_W, 14, 74);
+    const tipW = clamp(tip0, mouthW * JET_TIP_MIN, mouthW * JET_TIP_MAX);
+    const mid = { x: hitAt.x, y: hitAt.y - hitAt.s * 0.46 };
+    const a0 = axisTo(mid);
+    // sideways along the victim's OWN chassis, i.e. across the firing axis
+    const px = -a0.uy;
+    const py = a0.ux;
+    const cands = [mid];
+    for (const k of [0.55, -0.55, 0.95, -0.95]) {
+      cands.push({ x: mid.x + px * hitAt.s * k, y: mid.y + py * hitAt.s * k * CONE_FLAT });
+    }
+    cands.push({ x: hitAt.x, y: hitAt.y - hitAt.s * 0.14 });
+    // Centre of the front first, and the mouth this shot already used first of
+    // all, so a plume that is clear stays exactly where it was last frame.
+    const shifts = mem.shift != null
+      ? [mem.shift, ...anchors.keys()] : [...anchors.keys()];
+    for (const end of cands) {
+      // An impact inside the minimap column is clipped out of this layer, so the
+      // plume would stop dead in mid-air short of it: those candidates are only
+      // taken if nothing else on the chassis works.
+      const hud = hudBlocked(end.x, end.y) ? 4 : 0;
+      for (const sh of shifts) {
+        const a = axisTo(end, NOSE_OUT, sh);
+        const clear = coneClear(a.mouth, mouthW, end, tipW) - hud;
+        if (!pick || clear > pick.clear) pick = { end, a, clear, tipW, sh };
+        if (clear >= JET_CLEAR) break;
+      }
+      if (pick && pick.clear >= JET_CLEAR) break;
+    }
   }
+
+  // A shot the sim fired at nobody stays a burst for its whole life, and a shot
+  // with a victim stays a cone: the SHAPE is the sim's verdict, not a per-frame
+  // screen test, so it cannot flicker between the two.
+  if (b.dry) return dryBurst();
+  // ...which means a targeted shot may NOT drop to a burst just because this one
+  // frame could not solve an impact (the renderer shoulders, and sometimes drops,
+  // the victim's sprite for a beat). The cone this shot was already drawing is
+  // repainted where it was instead: a plume that becomes a sideways stub for a
+  // single frame reads as the flame letting go of the kart it is burning.
+  if (!pick) return mem.cone ? reCone(mem.cone, b) : dryBurst();
+
+  let end = pick.end;
+  // The victim can drift back onto our bumper late in the burn (we are closing on
+  // a kart whose speed we just halved): the cone follows it, but never collapses
+  // into a stub - the impact is pushed back out along the same heading.
+  if (pick.a.len < JET_MIN_RUN) {
+    const k = (JET_MIN_RUN + s * NOSE_OUT) / Math.max(1, pick.a.len + s * NOSE_OUT);
+    end = { x: base.x + (end.x - base.x) * k, y: base.y + (end.y - base.y) * k };
+  }
+  // Eased towards the impact rather than snapped to it, so a victim the renderer
+  // shoulders sideways for a frame cannot make the plume flick - but it always
+  // FOLLOWS the kart it is burning: a plume left behind on the patch of road the
+  // victim used to occupy is the "ends on empty tarmac" read all over again.
+  if (mem.end) {
+    end = {
+      x: mem.end.x + (end.x - mem.end.x) * 0.82,
+      y: mem.end.y + (end.y - mem.end.y) * 0.82,
+    };
+  }
+
+  // The minimap column is clipped out of this layer, so an impact in there would
+  // leave the plume stopping dead in mid-air short of its victim. Slide it back
+  // along the axis onto the victim's near flank instead - still on the kart.
+  // The mouth slide is re-solved for the impact that was actually chosen, with
+  // last frame's slide tried FIRST: while it still clears, the mouth does not
+  // move at all, so the plume cannot swing across the kart between frames.
+  let axis = null;
+  {
+    const order = mem.shift != null ? [mem.shift, ...anchors.keys()] : [...anchors.keys()];
+    let bestSh = null;
+    for (const sh of order) {
+      const a = axisTo(end, NOSE_OUT, sh);
+      const cl = coneClear(a.mouth, mouthW, end, pick.tipW);
+      if (!bestSh || cl > bestSh.cl) bestSh = { a, cl, sh };
+      if (cl >= JET_CLEAR) break;
+    }
+    mem.shift = bestSh.sh;
+    axis = bestSh.a;
+  }
+  if (hudBlocked(end.x, end.y)) {
+    for (let k = 10; k <= hitAt.s * 1.3; k += 10) {
+      const p = { x: end.x - axis.ux * k, y: end.y - axis.uy * k };
+      if (!hudBlocked(p.x, p.y)) { end = p; axis = axisTo(end, NOSE_OUT, mem.shift); break; }
+    }
+  }
+  mem.end = end;
 
   // ------------------------------------------------------------- the cone
   //
-  // ONE shape, and only one: the convex hull of a circle on our nose (at kart
-  // width) and a circle on the victim's projected footprint (at THEIR kart
-  // width). There is no separate muzzle flare, no mid-air segment and no impact
-  // sprite - each of those used to be its own drawing, and three drawings is
-  // exactly how the effect fell apart into disconnected pieces.
-  const noseW = clamp(from.s * JET_NOSE_W, 34, len * 0.72);
-  // Floored against the mouth: the flame must still be a substantial plume
-  // where it lands. A tip that pinches to a needle gets sliced in two by the
-  // rider cut-out below and reads as two unrelated slivers of fire.
-  const tipW = clamp(endW, Math.max(24, noseW * 0.50), noseW * 0.80);
+  // ONE shape, and only one: a flat near edge across the firer's nose and a round
+  // cap that wraps the victim's chassis. No separate muzzle flare, no mid-air
+  // segment, no impact sprite - each of those used to be its own drawing, and
+  // three drawings is exactly how the effect fell apart into disconnected pieces.
+  let noseW = clamp(mouthW * 0.78, 12, axis.len * 0.5);
+  let tipW = clamp(pick.tipW, noseW * JET_TIP_MIN, noseW * JET_TIP_MAX);
+  // Last safety valve: if the flame still grazes the character (a victim parked
+  // almost directly behind their head), thin it until it does not, rather than
+  // letting the cut-out bite a curved chunk out of the plume.
+  let clear = coneClear(axis.mouth, noseW, end, tipW);
+  for (let i = 0; i < 2 && clear < JET_CLEAR; i++) {
+    noseW *= 0.9;
+    tipW *= 0.9;
+    clear = coneClear(axis.mouth, noseW, end, tipW);
+  }
+  // Last resort, for the one case the geometry cannot win: the victim is drawn
+  // almost exactly behind the rider's head. Rather than thinning the flame to a
+  // thread or letting the cut-out bite a crescent out of it, the plume is cut
+  // SHORT at the character's outline - it reads as fire running up the road and
+  // disappearing behind them, which is what is physically happening.
+  if (clear < JET_CUT) {
+    let lo = 0.42;
+    let hi = 1;
+    for (let i = 0; i < 6; i++) {
+      const f = (lo + hi) / 2;
+      const p = { x: axis.mouth.x + (end.x - axis.mouth.x) * f, y: axis.mouth.y + (end.y - axis.mouth.y) * f };
+      if (coneClear(axis.mouth, noseW, p, noseW + (tipW - noseW) * f) >= JET_CLEAR) lo = f; else hi = f;
+    }
+    // A cut this deep is no longer "fire running up the road and disappearing
+    // behind the rider" - it is a stub that has let go of the kart it is burning,
+    // for the one frame the victim happens to line up with the rider's head.
+    // While this shot already has an anchored cone on record, that one is
+    // repainted: a plume 50 ms stale still ENDS on the victim, and the rider is
+    // clipped out of this layer regardless.
+    if (lo < 0.6 && mem.cone) return reCone(mem.cone, b);
+    tipW = noseW + (tipW - noseW) * lo;
+    end = { x: axis.mouth.x + (end.x - axis.mouth.x) * lo, y: axis.mouth.y + (end.y - axis.mouth.y) * lo };
+    clear = coneClear(axis.mouth, noseW, end, tipW);
+    // Even the cut cone can still graze the character on the odd frame. It is
+    // STILL a cone: the rider is clipped out of this layer anyway, so the worst
+    // case is a few flame pixels passing behind their shoulder - where dropping
+    // to a burst would be the flame visibly letting go of its victim mid-burn.
+    if (clear < JET_CUT && mem.cone) return reCone(mem.cone, b);
+  }
   // The far cap is round, so its centre is pulled back inside the victim's
   // footprint: the fire closes OVER the chassis instead of shooting past it.
   const pull = tipW * 0.34;
-  const ux = (end.x - muzzle.x) / len;
-  const uy = (end.y - muzzle.y) / len;
-  if (len > pull + 40) {
-    end = { x: end.x - ux * pull, y: end.y - uy * pull };
-  }
-  return {
+  const tipEnd = axis.len > pull + 40
+    ? { x: end.x - axis.ux * pull, y: end.y - axis.uy * pull }
+    : end;
+  const out = {
     cone: {
-      x0: muzzle.x, y0: muzzle.y, r0: noseW,
-      x1: end.x, y1: end.y, r1: tipW,
+      x0: axis.root.x, y0: axis.root.y, r0: noseW,
+      x1: tipEnd.x, y1: tipEnd.y, r1: tipW,
       clock: b.life,
     },
-    dz: hitAt ? hitAt.dz : toZ,
+    dz: hitAt.dz,
     tip: hitAt,
     target: lock ? lock.racer : null,
+    clear,
+    shift: mem.shift,
   };
+  // Remembered so a frame that cannot solve an impact can repaint this exact
+  // cone instead of flipping the shot to a muzzle burst.
+  mem.cone = out;
+  return out;
 }
 
 function drawOrdnance(view3, race, w, h, t, occ) {
@@ -551,9 +957,39 @@ function drawOrdnance(view3, race, w, h, t, occ) {
     const from = placeRacer(view3, race, owner, w, h);
     if (!from) continue;
     const lock = beamTarget(race, b, owner);
-    const plume = beamPlume(view3, race, b, owner, from, lock, w, h);
+    const rig = kartRig(owner, from, w);
+    const plume = beamPlume(view3, race, b, from, lock, w, h, rig);
     if (!plume) continue;
     const t01 = clamp(b.life / b.ttl, 0, 1);
+    // Cosmetic-only trace of what the plume actually became this frame, so the
+    // anchor can be measured (mouth vs rider silhouette) instead of eyeballed.
+    // Never read by the sim, never part of state().
+    if (typeof window !== 'undefined') {
+      window.__pkrBeam = {
+        life: +b.life.toFixed(3), mode: plume.dry ? 'burst' : 'cone',
+        target: plume.target ? plume.target.id : null,
+        cone: {
+          x0: Math.round(plume.cone.x0), y0: Math.round(plume.cone.y0),
+          r0: Math.round(plume.cone.r0),
+          x1: Math.round(plume.cone.x1), y1: Math.round(plume.cone.y1),
+          r1: Math.round(plume.cone.r1),
+        },
+        clear: plume.clear == null ? null : +plume.clear.toFixed(2),
+        hit: plume.tip ? { x: Math.round(plume.tip.x), y: Math.round(plume.tip.y), s: Math.round(plume.tip.s), src: plume.tip.src } : null,
+        shift: plume.shift == null ? null : +plume.shift.toFixed(2),
+        from: { x: Math.round(from.x), y: Math.round(from.y), s: Math.round(from.s) },
+        rider: (() => {
+          const rc = rig.at(0, RIDER_Y, RIDER_Z);
+          const re = rig.at(RIDER_RX, RIDER_Y, RIDER_Z);
+          const rt = rig.at(0, RIDER_Y + RIDER_RY, RIDER_Z);
+          return {
+            x: Math.round(rc.x), y: Math.round(rc.y),
+            rx: Math.round(Math.hypot(re.x - rc.x, re.y - rc.y)),
+            ry: Math.round(Math.hypot(rt.x - rc.x, rt.y - rc.y)),
+          };
+        })(),
+      };
+    }
 
     // The jet travels away from its firer, so only karts between the camera and
     // the firer can be in front of it. The firer's own body is cut out too -
@@ -574,32 +1010,31 @@ function drawOrdnance(view3, race, w, h, t, occ) {
     }
     c.clip('evenodd');
 
-    // Second, INDEPENDENT clip for our own kart. Kept separate from the one
-    // above because an even-odd path XORs overlapping cut-outs back open, and a
-    // rival drawn close behind us overlaps the chassis box below.
+    // Second, INDEPENDENT clip: the firer's RIDER. Kept separate from the one
+    // above (and from the chassis below) because an even-odd path XORs
+    // overlapping cut-outs back open, while consecutive clips intersect - which
+    // is what actually removes the UNION of the three silhouettes.
+    //
+    // The flame is breathed from the hood tip, which is the FURTHEST point of
+    // our own kart from the chase camera; the character sits nearer. So the
+    // plume has to pass BEHIND their head and shoulders, and the cut-out is the
+    // whole character - head, chest and shoulder line - projected on the rider
+    // plane through the kart's own rig. Anything less leaves fire smeared over a
+    // cheek or a shoulder, which is exactly what read as "the beam crosses the
+    // hero".
     c.beginPath();
     c.rect(0, 0, STAGE_W, STAGE_H);
-    // Cut the firer's RIDER out. The flame is breathed from the hood in front
-    // of them, so it is physically further from the camera than the character
-    // is: it has to pass BEHIND the head and shoulders, never across the face.
-    // (Everything below the lip is the hood itself, which the muzzle sits on -
-    // cutting the whole body out would leave nothing of the cone on screen.)
-    // The chase yaw parks the rider slightly right of the kart's centre line,
-    // which is also why the muzzle is nudged the other way.
-    // Sized to the actual head+shoulders: the plume has to vanish cleanly
-    // BEHIND the rider on its way up the road (a target dead ahead always sits
-    // directly past them), which reads as depth. A cut that is too small just
-    // smears fire across the character's cheek.
-    const hx = from.x + from.s * 0.26;
-    const hy = from.y - from.s * 1.52;
-    c.moveTo(hx + from.s * 0.23, hy);
-    c.ellipse(hx, hy, from.s * 0.23, from.s * 0.29, 0, 0, Math.PI * 2, true);
-    // Cut our own CHASSIS out too, everything from the hood lip down. The cone's
-    // mouth is anchored on the nose, which is the furthest point of our kart
-    // from the camera - so the half of the mouth that would fall on the bodywork
-    // behind it is hidden by the bodywork. What is left is a flame that starts
-    // exactly at the hood lip, which is the whole read the reference has.
-    c.rect(from.x - from.s * 0.86, from.y - from.s * 0.88, from.s * 2.26, from.s * 2.60);
+    tracePlaneEllipse(c, rig, RIDER_Y, RIDER_Z, RIDER_RX, RIDER_RY);
+    c.clip('evenodd');
+
+    // Third clip: our own BODYWORK. The mouth sits over the hood tip, which is
+    // the FURTHEST point of our kart from the chase camera, so any part of the
+    // flame that lands on the deck or the flanks is behind them and must not be
+    // painted. The cut is the projected hull of the body itself, so the fire
+    // licks over the hood line exactly where the hood ends.
+    c.beginPath();
+    c.rect(0, 0, STAGE_W, STAGE_H);
+    traceKartHull(c, rig);
     c.clip('evenodd');
 
     paint.flameCone(c, plume.cone, t01);

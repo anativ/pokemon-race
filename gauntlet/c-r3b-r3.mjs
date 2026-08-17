@@ -1,0 +1,50 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const track = process.argv[2] || 'pallet-town';
+const tag = process.argv[3] || 'A';
+const warm = Number(process.argv[4] || 6000);
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const errs = [];
+page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+page.on('pageerror', e => errs.push('PAGEERR ' + e.message));
+await page.goto(`${url}/index.html?screen=race&track=${track}&racer=pikachu&item=hyper-beam`);
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(w => window.__pkr.step(w), warm);
+await page.waitForTimeout(120);
+const pre = await page.evaluate(() => {
+  const s = window.__pkr.state().race;
+  const me = s.racers.find(r => r.id === s.playerId);
+  const ahead = s.racers.filter(r => r.dist > me.dist).sort((a, b) => a.dist - b.dist).slice(0, 3)
+    .map(r => `${r.id} +${(r.dist - me.dist).toFixed(1)} lane${r.lane.toFixed(2)}`);
+  return { pos: s.hud.pos, item: s.hud.item, ahead, myLane: me.lane.toFixed(2) };
+});
+console.log('PRE', JSON.stringify(pre));
+const B = () => page.evaluate(() => window.__pkrBeam || null);
+const shot = async (n) => {
+  await page.screenshot({ path: `gauntlet/shots/beam-anchor-p3r3-${tag}-${n}.png` });
+  await page.screenshot({ path: `gauntlet/shots/beam-anchor-p3r3-${tag}-${n}-zoom.png`, clip: { x: 460, y: 260, width: 900, height: 620 } });
+};
+await page.keyboard.press('Space');
+await page.waitForTimeout(80);
+await page.evaluate(() => window.__pkr.step(16));
+await page.waitForTimeout(80);
+console.log('BEAM@fire', JSON.stringify(await B()));
+await shot('1fire');
+await page.evaluate(() => window.__pkr.step(184));
+await page.waitForTimeout(100);
+console.log('BEAM@200', JSON.stringify(await B()));
+await shot('2t200');
+await page.evaluate(() => window.__pkr.step(200));
+await page.waitForTimeout(100);
+console.log('BEAM@400', JSON.stringify(await B()));
+await shot('3t400');
+const post = await page.evaluate(() => {
+  const s = window.__pkr.state().race;
+  const me = s.racers.find(r => r.id === s.playerId);
+  return { pos: s.hud.pos, item: s.hud.item, slow: s.racers.filter(r => r.speed < 40).map(r => r.id + ':' + r.speed.toFixed(0)), mySpeed: me.speed.toFixed(0) };
+});
+console.log('POST', JSON.stringify(post));
+console.log('ERRORS', errs.length, errs.slice(0, 5).join(' | '));
+await browser.close(); await close();
