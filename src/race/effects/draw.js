@@ -236,6 +236,124 @@ export function flameCone(c, cone, t, opts = {}) {
   c.restore();
 }
 
+// ---------------------------------------------------------------- muzzle puff
+//
+// A DRY Hyper Beam - fired with nobody in front - has no victim to terminate on,
+// so it must not be painted with `flameCone`. That routine builds one hard hull
+// between two circles, and with no far kart to swallow the tip the result is a
+// uniform-width capsule: a hard-edged orange popsicle stick lying over the road.
+// A muzzle burst is the opposite thing - a soft, layered plume that swells just
+// off the hood and thins away to nothing - so it gets its own painter.
+
+/**
+ * Width of the plume along its axis, as a share of the mouth radius. Fat at the
+ * hood, fattest a fifth of the way out, then a long taper to a wisp: the profile
+ * of fire leaving a nozzle, and the one thing the old capsule had none of.
+ */
+const PUFF_PROFILE = Object.freeze([
+  0.70, 0.94, 1.00, 0.97, 0.90, 0.80, 0.69, 0.57, 0.45, 0.34, 0.24, 0.16, 0.10,
+]);
+
+/**
+ * Concentric passes, all additive with soft radial falloff - so the plume has NO
+ * outline anywhere, and its root melts into the hood paint underneath instead of
+ * being stamped on top of it. `reach` keeps the hot inner cores near the muzzle,
+ * which is what gives the plume a white throat and a deep orange tail.
+ */
+const PUFF_LAYERS = Object.freeze([
+  { k: 1.34, a: 0.26, blur: 15, reach: 1.00, hot: 'rgba(255,150,52,0.9)', mid: 'rgba(255,104,22,0.5)', out: 'rgba(255,86,14,0)' },
+  { k: 1.00, a: 0.50, blur: 8, reach: 1.00, hot: 'rgba(255,182,70,1)', mid: 'rgba(248,108,18,0.7)', out: 'rgba(230,66,10,0)' },
+  { k: 0.60, a: 0.58, blur: 5, reach: 0.66, hot: 'rgba(255,231,146,1)', mid: 'rgba(255,164,44,0.7)', out: 'rgba(255,132,26,0)' },
+  { k: 0.30, a: 0.66, blur: 4, reach: 0.34, hot: 'rgba(255,252,224,1)', mid: 'rgba(255,214,110,0.65)', out: 'rgba(255,178,54,0)' },
+]);
+
+/** Sample the taper at `s` in [0,1], linearly between profile knots. */
+function puffWidth(s) {
+  const f = Math.max(0, Math.min(1, s)) * (PUFF_PROFILE.length - 1);
+  const i = Math.min(PUFF_PROFILE.length - 2, Math.floor(f));
+  return PUFF_PROFILE[i] + (PUFF_PROFILE[i + 1] - PUFF_PROFILE[i]) * (f - i);
+}
+
+/**
+ * Dry-fire muzzle burst: a soft tapered plume from `{x0,y0,r0}` (buried under
+ * the hood's forward face) to `{x1,y1,r1}` (a wisp out in front of the nose),
+ * painted as a chain of blurred, additive, radially-faded blobs plus a scatter
+ * of embers off the tip.
+ *
+ * Same squashed cross-section as `flameCone` (`flat`), so a plume aimed across
+ * the frame still reads kart-TALL rather than standing up as a wall.
+ */
+export function flamePuff(c, cone, t, opts = {}) {
+  if (!cone) return;
+  const fade = t > 0.70 ? Math.max(0, (1 - t) / 0.30) : 1;
+  if (fade <= 0.01) return;
+  const flat = cone.flat || 0.62;
+  const x0 = cone.x0;
+  const y0 = cone.y0 / flat;
+  const x1 = cone.x1;
+  const y1 = cone.y1 / flat;
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  if (!(d > 2)) return;
+  const ux = (x1 - x0) / d;
+  const uy = (y1 - y0) / d;
+  const px = -uy;
+  const py = ux;
+  const clock = cone.clock || 0;
+  const R = Math.max(3, cone.r0);
+  const canBlur = opts.blur !== false && typeof c.filter === 'string';
+  const N = 13;
+
+  c.save();
+  c.scale(1, flat);
+  c.globalCompositeOperation = 'lighter';
+  for (const L of PUFF_LAYERS) {
+    if (canBlur) c.filter = `blur(${L.blur}px)`;
+    for (let i = 0; i < N; i++) {
+      const s = i / (N - 1);
+      if (s > L.reach) break;
+      // The plume BOILS: each blob breathes on its own phase and drifts a little
+      // across the axis, more so the further out it is - so the far end frays
+      // like fire instead of holding a machined edge.
+      const w = R * puffWidth(s) * L.k
+        * (0.88 + 0.26 * fnoise(i * 5.7 + L.k * 3.3))
+        * (0.9 + 0.14 * Math.sin(clock * 24 + i * 1.9));
+      if (!(w > 0.6)) continue;
+      const wob = Math.sin(clock * 16 + i * 2.4) * R * 0.13 * s;
+      const cx = x0 + ux * (s * d) + px * wob;
+      const cy = y0 + uy * (s * d) + py * wob;
+      // Fade the last blobs out along the layer's own reach: nothing in this
+      // shape is allowed to end on a visible boundary.
+      const tail = L.reach >= 1 ? Math.min(1, (1 - s) / 0.22 + 0.35) : 1 - (s / L.reach) ** 1.6;
+      c.globalAlpha = fade * L.a * Math.max(0, Math.min(1, tail));
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, w);
+      g.addColorStop(0, L.hot);
+      g.addColorStop(0.48, L.mid);
+      g.addColorStop(1, L.out);
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(cx, cy, w, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  // Embers streaming off the tip: the plume's taper ends in sparks rather than
+  // stopping dead, which is what the reference's flame trails do.
+  if (canBlur) c.filter = 'blur(2px)';
+  for (let i = 0; i < 6; i++) {
+    const ph = (clock * 1.5 + fnoise(i * 7.3)) % 1;
+    const s = 0.78 + ph * 0.46;
+    const er = Math.max(0.8, R * 0.13 * (1 - ph));
+    const ex = x0 + ux * (s * d) + px * (fnoise(i * 3.1) - 0.5) * R * 0.9 * ph;
+    const ey = y0 + uy * (s * d) + py * (fnoise(i * 3.1) - 0.5) * R * 0.9 * ph;
+    c.globalAlpha = fade * 0.7 * (1 - ph);
+    c.fillStyle = i % 2 ? 'rgba(255,226,140,1)' : 'rgba(255,160,50,1)';
+    c.beginPath();
+    c.arc(ex, ey, er, 0, Math.PI * 2);
+    c.fill();
+  }
+  if (canBlur) c.filter = 'none';
+  c.restore();
+}
+
 /** Straight-line variant (kept for simple two-point effects). */
 export function beam(c, from, to, width, t, color = '#ffe98a') {
   const fade = t < 0.12 ? t / 0.12 : (t > 0.75 ? (1 - t) / 0.25 : 1);

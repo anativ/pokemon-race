@@ -1,0 +1,20 @@
+import { chromium } from 'playwright';
+import { serveRepo } from '../tools/screenshot.mjs';
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1600, height: 900 } });
+const probs=[]; p.on('console',m=>{if(m.type()==='error')probs.push(m.text())}); p.on('pageerror',e=>probs.push('pageerror: '+e.message));
+await p.goto(origin+'/index.html?screen=character-select');
+await p.waitForFunction(()=>window.__pkr&&window.__pkr.isReady===true);
+console.log('missingSpecies =', JSON.stringify(await p.evaluate(()=>window.__pkr.art.missingSpecies(window.__pkr.roster))));
+console.log('registered =', JSON.stringify(await p.evaluate(()=>window.__pkr.registered())));
+// determinism spot-check
+await p.evaluate(()=>{window.__pkr.goto('race',{track:'pallet-town'});window.__pkr.seed(42);window.__pkr.step(3000);});
+const a = await p.evaluate(()=>JSON.stringify(window.__pkr.state()));
+await p.goto(origin+'/index.html?screen=title');
+await p.waitForFunction(()=>window.__pkr&&window.__pkr.isReady===true);
+await p.evaluate(()=>{window.__pkr.goto('race',{track:'pallet-town'});window.__pkr.seed(42);window.__pkr.step(3000);});
+const c = await p.evaluate(()=>JSON.stringify(window.__pkr.state()));
+console.log('deterministic =', a===c, 'len', a.length);
+await b.close(); await close();
+console.log(probs.length?'PROBLEMS '+probs.join(' | '):'clean');

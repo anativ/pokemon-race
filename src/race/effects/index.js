@@ -18,6 +18,12 @@ import { createCamera, updateCamera } from '../camera.js';
 import { projectRoad, placeAt, CAM_BACK } from '../projection.js';
 import { getItem } from '../items.js';
 import { makeFrame } from '../kart3d.js';
+// Read-only: the chassis's OWN cross-sections and axles, so the silhouette this
+// layer cuts the flame against is derived from the mesh that is actually drawn
+// instead of from a hand-copied outline that goes stale the moment the kart is
+// restyled (which is how a hood line that had moved down left a few pixels of
+// daylight under the muzzle burst).
+import { RING as BODY_RING, AXLE } from '../kartBody.js';
 import * as paint from './draw.js';
 
 const STAGE_W = 1600;
@@ -401,8 +407,58 @@ const JET_EDGE = 0.045;
 const JET_TIP_W = 0.80;      // half width at the impact, in VICTIM-kart sizes
 const JET_TIP_MIN = 0.55;    // tip may never pinch below this share of the mouth
 const JET_TIP_MAX = 1.70;    // ...nor bloom past this share of it
-const JET_BURST = 0.72;      // dry-fire burst length, in hero half-widths
-const BURST_OUT = 0.52;      // burst mouth: half-widths forward along its axis
+const JET_BURST = 1.02;      // dry-fire burst length, in hero half-widths
+/**
+ * Far cap of the burst as a share of its mouth. WELL under 1: a puff that keeps
+ * its width all the way out is a capsule - a popsicle stick lying on the road -
+ * and the only shape that reads as fire is one that tapers to a wisp.
+ */
+const BURST_TIP = 0.18;
+/**
+ * How far back INSIDE the hood, from the hood's screen-forward face, the burst's
+ * near cap is centred - in hero half-widths, so it scales with the kart. This is
+ * the number that welds the puff to the bodywork: the drawn shape's flat near
+ * edge ends up buried under the paint, so what the player sees is fire welling
+ * up out of the front of the kart, and there is no pose in which a band of road
+ * or grass can open up under it.
+ */
+const BURST_BACK = 0.22;
+/**
+ * How far along the axis the hood-exit march is allowed to look, in hero
+ * half-widths. Roughly the length of the kart on screen: past that the ray is
+ * out over the road and there is nothing left to exit.
+ */
+const BURST_SPAN = 2.6;
+/**
+ * Share of the burst's near cap that must land on painted bodywork before the
+ * anchor is accepted. Measured with `bodyOverlap`, which is the only test that
+ * answers the question the player actually sees: does the fire leave the kart,
+ * or hang beside it?
+ */
+const BURST_ON_BODY = 0.7;
+/**
+ * ROOT OF A DRY MUZZLE BURST, in kart-local units - points strictly INSIDE the
+ * lofted front bodywork (src/race/kartBody.js `RING`: at z = 1.10 the shell runs
+ * from floor y = 0.294 up to deck y = 0.573 with half width 0.46, at z = 1.20
+ * from 0.303 to 0.535, and the cockpit opening only starts back at z = 0.30, so
+ * this whole stretch is solid hood).
+ *
+ * A point inside a convex-ish solid projects INSIDE that solid's screen
+ * silhouette at every yaw, roll and pitch - so a burst rooted here lands on
+ * painted hood pixels on a straight AND with the mesh swung a full radian off
+ * the road mid-corner. That is the whole fix: the old anchors sat on the front
+ * ground line (y ~ 0.05, z ~ 1.1), which is *in front of and below* the lofted
+ * nose, so on a hard bend the root projected onto bare tarmac a kart-width off
+ * the flank with nothing but air behind it.
+ *
+ * Centre first; the two inboard points exist only to walk the puff out from
+ * behind the rider, and they stay well inside the front axle so the fire can
+ * never read as coming out of the flank.
+ */
+const DRY_ROOT_PTS = Object.freeze([
+  [0, 0.40, 1.32],
+  [0.14, 0.40, 1.22], [-0.14, 0.40, 1.22],
+]);
 /**
  * Where on the kart the fire may leave from, in kart-local units (x right, y up,
  * z towards the nose; ground at y = 0, the hull's front ground line is z ~ 1.0 and
@@ -423,9 +479,29 @@ const FRONT_PTS = Object.freeze([
  * the firer's own rider. Small on purpose - the puff still has to read as fire
  * breathed forwards, not sideways out of the flank.
  */
-const BURST_YAW = Object.freeze([0, 0.16, -0.16, 0.32, -0.32]);
-/** Widest the burst may lean off screen-up to follow the circuit (radians). */
-const BURST_LEAN = 0.22;
+const BURST_YAW = Object.freeze([0, 0.11, -0.11, 0.22, -0.22]);
+/**
+ * THE HEADING THE PUFF IS FIRED ALONG, as two points on the chassis centreline
+ * (kart-local z, at hood height). Projected through the kart's own rig, the line
+ * between them IS the direction the hood points on screen at this yaw, roll and
+ * pitch - which is the one direction a muzzle burst can take and still read as
+ * fire leaving the front of the kart.
+ *
+ * The old axis was "screen-up, leaned a little towards the road ahead". That is
+ * fine for a kart drawn head-on and wrong for every other pose: the mesh is
+ * presented at up to a radian of yaw, so its hood can point almost straight
+ * across the frame while the puff stood bolt upright out of a wheel arch and
+ * pointed into the scenery.
+ */
+const DRY_AXIS_Y = 0.40;
+const DRY_AXIS_BACK = -0.10;
+const DRY_AXIS_FWD = 1.30;
+/**
+ * How far the plume curls off that heading towards the sky, as a slope. Flame
+ * rises; a puff laid exactly along a near-horizontal hood reads as spilt fuel on
+ * the tarmac. Small enough that the shot still visibly follows the nose.
+ */
+const BURST_LIFT = 0.26;
 const JET_MIN_GAP = 66;      // below this the rival is not drawn clear of us
 const JET_LOCK_LANE = 1.30;  // lane half-window the jet can lock onto
 const JET_MIN_RUN = 170;     // shortest a cone WITH a victim may be (px)
@@ -491,23 +567,97 @@ function tracePlaneEllipse(c, rig, cy, z, rx, ry, seg = 22) {
   c.closePath();
 }
 
-// Corners of the firing kart's own hull, in kart-local units: the lofted body's
-// widest rings (nose, hips, tail) at deck height and at the ground line. Their
-// screen convex hull is our bodywork, which stands between the camera and the
-// mouth of the flame.
-const HULL_PTS = Object.freeze([
-  [0, 0.58, 1.44], [-0.30, 0.50, 1.42], [0.30, 0.50, 1.42],
-  [-0.72, 0.77, 0.86], [0.72, 0.77, 0.86],
-  [-0.80, 0.94, -0.46], [0.80, 0.94, -0.46],
-  [-0.74, 1.01, -0.98], [0.74, 1.01, -0.98],
-  [-0.36, 0.86, -1.22], [0.36, 0.86, -1.22],
-  [-0.86, 0.02, -1.10], [0.86, 0.02, -1.10],
-  [-0.86, 0.02, 0.90], [0.86, 0.02, 0.90],
+// Corners of the firing kart's own hull, in kart-local units - DERIVED from the
+// chassis's own lofted cross-sections (deck line and floor line of every ring)
+// plus the four tyres. Their screen convex hull is our bodywork, which stands
+// between the camera and the mouth of the flame.
+//
+// Derived, not transcribed: a hand-copied outline silently stops matching the
+// mesh the moment the kart is restyled, and a silhouette that is TALLER than the
+// hood it stands for cuts the near end off the flame and leaves daylight between
+// the muzzle burst and the bodywork.
+// ONE convex hull over the whole kart does NOT work here, and measuring it
+// against the rendered pixels is how that was found out: the deck line is
+// concave (it climbs from the snout and flattens onto the cowl) and, more than
+// that, the chase frustum is CLOSE - CAM_D is 8.6 kart units and the body is
+// nearly 3 long - so 1/z bows the projected deck noticeably between any two
+// widely separated rings. A single hull threw a chord from the cowl to the snout
+// that floated 20-30 screen pixels ABOVE the painted hood, and since this same
+// silhouette is the cut-out, the visible near end of a flame rooted in the hood
+// began in mid-air over the grass beside the kart.
+//
+// So the body is carried as a CHAIN of short overlapping convex slabs instead:
+// a few rings each, each slab short enough that neither the concavity nor the
+// perspective bow can lift its hull off the paint, and overlapping by a ring so
+// no sliver of daylight opens at a seam once each slab is inset. Their union is
+// the body; the cut-out is the union, and the flame's anchor is measured against
+// it.
+const HULL_WINDOW = 3;   // rings per slab
+const HULL_STRIDE = 2;   // rings advanced between slabs (so they overlap by one)
+/**
+ * The lofted shell's own cross-section, as `[width fraction, height]` pairs from
+ * the floor up to the deck - a mirror of `ring()` in src/race/kartBody.js, which
+ * is the function that actually builds these sections. `h` is a fraction of the
+ * section's height above its floor; `t` is an absolute drop below its deck.
+ *
+ * This profile is the difference between a silhouette that sits ON the paint and
+ * one that floats over it. The shell reaches its FULL half width at 40% of the
+ * section height and has already rolled in to 58% of it by the deck, so a corner
+ * point taken at (full width, deck height) - which is what used to stand in for
+ * the flank here - is a point the mesh never occupies. Yawed three quarters on,
+ * that phantom corner projected 25 screen pixels above the painted hood, and
+ * since this silhouette is also the cut-out, the visible near end of a flame
+ * rooted in the hood began in mid-air over the grass beside it.
+ */
+const SHELL_PROFILE = Object.freeze([
+  [0.500, { h: 0 }], [0.840, { h: 0.045 }], [0.975, { h: 0.20 }],
+  [1.000, { h: 0.40 }], [0.995, { h: 0.62 }], [0.965, { h: 0.80 }],
+  [0.905, { h: 0.90 }], [0.800, { t: 0.062 }], [0.680, { t: 0.024 }],
+  [0.580, { t: 0.002 }],
 ]);
+const AXLES = Object.freeze([
+  [AXLE.front, AXLE.xf, AXLE.rf, AXLE.hwf],
+  [AXLE.rear, AXLE.xr, AXLE.rr, AXLE.hwr],
+]);
+const HULL_PARTS = Object.freeze((() => {
+  const parts = [];
+  const n = BODY_RING.length;
+  for (let i = 0; i < n - 1; i += HULL_STRIDE) {
+    const slab = BODY_RING.slice(i, Math.min(n, i + HULL_WINDOW));
+    if (slab.length < 2) break;
+    const pts = [];
+    let zLo = Infinity;
+    let zHi = -Infinity;
+    for (const [z, hw, deck, floor] of slab) {
+      zLo = Math.min(zLo, z);
+      zHi = Math.max(zHi, z);
+      // Deck and floor centrelines...
+      pts.push([0, deck, z], [0, floor, z]);
+      // ...and the real flank profile between them, both sides.
+      for (const [wf, at] of SHELL_PROFILE) {
+        const y = at.h != null ? floor + at.h * (deck - floor) : deck - at.t;
+        pts.push([wf * hw, y, z], [-wf * hw, y, z]);
+      }
+    }
+    // A tyre joins every slab it actually stands beside, so the wheel is welded
+    // into the body's silhouette instead of floating as a separate island.
+    for (const [z, x, r, hw] of AXLES) {
+      if (z + r < zLo || z - r > zHi) continue;
+      for (const sx of [1, -1]) {
+        pts.push([sx * (x + hw), r * 0.04, z], [sx * (x + hw), r * 1.96, z],
+          [sx * (x + hw), r, z - r * 0.98], [sx * (x + hw), r, z + r * 0.98]);
+      }
+    }
+    parts.push(Object.freeze(pts));
+    if (i + HULL_WINDOW >= n) break;
+  }
+  return parts;
+})());
 
-/** The firing kart's projected body silhouette, as a convex polygon. */
-function kartHull(rig) {
-  const pts = HULL_PTS.map((p) => rig.at(p[0], p[1], p[2]));
+/** How much of the projected silhouette the bodywork cut-out keeps (see below). */
+const HULL_INSET = 0.972;
+
+function convexHull(pts) {
   pts.sort((a, b) => (a.x - b.x) || (a.y - b.y));
   const cross = (o, a, bb) => (a.x - o.x) * (bb.y - o.y) - (a.y - o.y) * (bb.x - o.x);
   const half = (list) => {
@@ -523,12 +673,113 @@ function kartHull(rig) {
   return lower.slice(0, -1).concat(upper.slice(0, -1));
 }
 
-/** Add the firing kart's projected body silhouette (convex hull) to the path. */
-function traceKartHull(c, rig) {
-  const hull = kartHull(rig);
-  if (hull.length < 3) return;
-  hull.forEach((p, i) => { if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y); });
-  c.closePath();
+function shrink(hull, k) {
+  if (hull.length < 3 || k >= 1) return hull;
+  let cx = 0;
+  let cy = 0;
+  for (const p of hull) { cx += p.x; cy += p.y; }
+  cx /= hull.length;
+  cy /= hull.length;
+  return hull.map((p) => ({ x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k }));
+}
+
+/**
+ * The firing kart's projected body silhouette, as a LIST of convex polygons
+ * whose union is the body. Each piece is pulled in a couple of percent so the
+ * cut-out finishes just INSIDE the paint: the flame then licks over the
+ * outermost few pixels of bodywork - fire touching the hood - instead of
+ * stopping a hair short of it and reading as a puff floating beside the kart.
+ */
+function kartHullParts(rig, inset = HULL_INSET) {
+  // Projected once per rig and re-inset from there: the section profile above is
+  // ~350 points, and a beam frame asks for this silhouette four or five times.
+  if (!rig.__hull) {
+    rig.__hull = HULL_PARTS
+      .map((part) => convexHull(part.map((p) => rig.at(p[0], p[1], p[2]))))
+      .filter((h) => h.length >= 3);
+  }
+  return inset >= 1 ? rig.__hull : rig.__hull.map((h) => shrink(h, inset));
+}
+
+/** Is `p` inside the convex screen polygon `poly`? */
+function inPoly(poly, p) {
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const bb = poly[(i + 1) % poly.length];
+    const cr = (bb.x - a.x) * (p.y - a.y) - (bb.y - a.y) * (p.x - a.x);
+    if (Math.abs(cr) < 1e-9) continue;
+    const s = cr > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return sign !== 0;
+}
+
+/** Is `p` inside the UNION of the body pieces? */
+function inBody(parts, p) {
+  for (const poly of parts) if (inPoly(poly, p)) return true;
+  return false;
+}
+
+/**
+ * Distance from `p` along the unit direction (ux, uy) to where the ray leaves the
+ * body (the union of the convex pieces) - i.e. how much of a plume rooted at `p`
+ * is hidden by the bodywork cut-out applied at paint time. 0 when `p` is already
+ * outside it. Marched rather than solved, because the union of two convex pieces
+ * is not itself convex: what we want is the FIRST time the ray gets out into
+ * daylight, not the last edge it happens to cross.
+ */
+function bodyExit(parts, p, ux, uy, span, step = 3) {
+  if (!parts.length || !inBody(parts, p)) return 0;
+  let far = 0;
+  for (let t = step; t <= span; t += step) {
+    if (!inBody(parts, { x: p.x + ux * t, y: p.y + uy * t })) break;
+    far = t;
+  }
+  return far;
+}
+
+/**
+ * How much of the DRAWN near end of a plume actually lands on bodywork, as a
+ * fraction of its end cap: the measured answer to "does this fire leave the
+ * kart, or float beside it?". Sampled across the cap (the flame's cross-section
+ * is squashed by CONE_FLAT, so the sweep is too) a couple of pixels back down
+ * the axis, against the UN-inset silhouette - i.e. against the paint itself,
+ * not against the slightly smaller polygon that gets cut out.
+ */
+function bodyOverlap(parts, mouth, ux, uy, r) {
+  if (!parts.length) return 0;
+  const px = -uy;
+  const py = ux;
+  let hit = 0;
+  let n = 0;
+  for (const k of [0, 0.4, -0.4, 0.75, -0.75]) {
+    for (const back of [1, 5]) {
+      const p = {
+        x: mouth.x - ux * back + px * r * k,
+        y: mouth.y - uy * back + py * r * k * CONE_FLAT,
+      };
+      n++;
+      if (inBody(parts, p)) hit++;
+    }
+  }
+  return n ? hit / n : 0;
+}
+
+/** Clip the firing kart's projected bodywork out of the current context. */
+function clipKartHull(c, rig) {
+  // One clip PER convex piece (each "everything except this piece"), because an
+  // even-odd path would XOR the overlapping pieces back open down the middle of
+  // the kart, while consecutive clips intersect - and the intersection of the
+  // complements is exactly the complement of the union.
+  for (const hull of kartHullParts(rig)) {
+    c.beginPath();
+    c.rect(0, 0, STAGE_W, STAGE_H);
+    hull.forEach((p, i) => { if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y); });
+    c.closePath();
+    c.clip('evenodd');
+  }
 }
 
 /**
@@ -587,7 +838,9 @@ function reCone(prev, b) {
 /**
  * Build the plume: a ground-hugging flame cone that leaves the firer's leading
  * edge, runs down the tarmac and terminates ON the struck kart - or, for a shot
- * fired with nobody in front, a short muzzle burst off the same anchor.
+ * fired with nobody in front, a short muzzle burst rooted INSIDE the front
+ * bodywork (see DRY_ROOT_PTS), which is what welds the puff to the hood at every
+ * yaw the mesh can strike.
  *
  * Returns `{ cone, dz, tip, dry, target, clear }`; `cone` is the one shape that
  * gets painted (flat near edge on the kart's nose -> round cap on the victim).
@@ -679,58 +932,142 @@ function beamPlume(view3, race, b, from, lock, w, h, rig) {
     // road rather than off the mesh's exaggerated three-quarter yaw. (A direction
     // taken between two road samples instead is nearly horizontal at this depth,
     // which is what made the burst read as fire out of the flank.)
-    let ax = 0;
-    let ay = -1;
-    const up = placeWorld(view3, fromZ + 260, b.lane);
-    if (up) {
-      // ...and LEANED, not aimed: on a hard bend that tarmac sits far out to one
-      // side, and a puff fired straight at it reads as fire breathed out of the
-      // flank. The heading is clamped to a shallow angle off screen-up, which is
-      // the direction "forwards" reads as from behind the kart.
-      const lean = clamp(Math.atan2(up.x - base.x, Math.max(1, base.y - up.y)), -BURST_LEAN, BURST_LEAN);
-      ax = Math.sin(lean);
-      ay = -Math.cos(lean);
-    }
+    // The puff is rooted INSIDE the front bodywork, and its DRAWN near cap is
+    // then parked back under the hood's screen-forward face: both ends of it are
+    // tied to the mesh, and the base of the flame covers painted hood pixels
+    // rather than starting wherever a cut-out happens to end.
+    const roots = DRY_ROOT_PTS.map((q) => rig.at(q[0], q[1], q[2]));
+    // The body as PAINTED (un-inset), because for a dry burst this silhouette is
+    // not a cut-out - it is the surface the fire has to sit on. A cone running
+    // down the road has to pass behind our own bodywork, but a muzzle puff at the
+    // snout does the opposite: it licks OVER the hood, and cutting it flat along
+    // the hood line is exactly what turned it into a hard-edged bar hanging in
+    // mid-air beside the kart. So this shape is used to find the hood's
+    // screen-forward face and to MEASURE the overlap, and the burst is painted
+    // over it (see `noBodyClip`).
+    const paint = kartHullParts(rig, 1);
+    // THE AXIS IS THE KART'S OWN HEADING AS DRAWN, not the road ahead and not
+    // screen-up. Two points on the chassis centreline pushed through the same rig
+    // the mesh is drawn with give the direction the hood is pointing in SCREEN
+    // space this frame, so the puff always leaves along the nose - down the frame
+    // on a near-side-on pose, up it on a square one - instead of standing upright
+    // out of a wheel arch while the bodywork lies across the screen.
+    const hb = rig.at(0, DRY_AXIS_Y, DRY_AXIS_BACK);
+    const hf = rig.at(0, DRY_AXIS_Y, DRY_AXIS_FWD);
+    const hl = Math.hypot(hf.x - hb.x, hf.y - hb.y) || 1;
+    // ...plus a touch of lift, because flame rises off a hood rather than lying
+    // along it. Applied in screen-up, then renormalised.
+    let ax = (hf.x - hb.x) / hl;
+    let ay = (hf.y - hb.y) / hl - BURST_LIFT;
+    const al = Math.hypot(ax, ay) || 1;
+    ax /= al;
+    ay /= al;
     // Blooms out of the hood over the first frames, then holds: a puff, not a jet.
     const run = s * JET_BURST * (0.6 + 0.4 * clamp(b.life / 0.08, 0, 1));
+    const tipW = mouthW * BURST_TIP;
+    // Fatter at the hood than a targeted cone's mouth: this shape has no victim
+    // to grow into, so all of its volume has to live in the first third, where it
+    // sits on the bodywork. A thin root reads as a spark trail, not a plume.
+    const mouthR = mouthW * 1.14;
     let best = null;
-    // Only the middle of the front and the two inner corners: a short puff has no
-    // long axis to read a direction off, so one hung out on a front CORNER just
-    // looks like a fireball beside the flank.
-    for (let ai = 0; ai < Math.min(3, anchors.length); ai++) {
+    // The roots are BURIED in the hood (see DRY_ROOT_PTS). Marching each one up
+    // the shot's own axis to where it leaves the painted body gives that pose's
+    // hood FORWARD FACE - the point on the bodywork the fire has to erupt from,
+    // whatever the yaw. The drawn near cap is then parked a fixed bite back
+    // INSIDE the hood from there, so the base of the flame always covers hood
+    // pixels and the flat near edge of the shape is buried under the paint.
+    for (let ai = 0; ai < roots.length; ai++) {
       for (const rot of BURST_YAW) {
         const cs = Math.cos(rot);
         const sn = Math.sin(rot);
         const ux = ax * cs - ay * sn;
         const uy = ax * sn + ay * cs;
-        const from0 = anchors[ai];
-        const a = axisTo({ x: from0.x + ux * 600, y: from0.y + uy * 600 }, BURST_OUT, ai);
-        const tip = { x: a.mouth.x + ux * run, y: a.mouth.y + uy * run };
-        const clear = coneClear(a.mouth, mouthW, tip, mouthW * 1.3);
-        // Straight ahead out of the middle of the front is the shot; the corners
-        // and the small yaws exist only to keep the puff off the rider.
-        const cost = Math.max(0, JET_CLEAR - clear) * 10 + Math.abs(rot) + ai * 0.42;
-        if (!best || cost < best.cost) best = { a, tip, clear, cost };
+        const root = roots[ai];
+        // Marched, not solved: the body is a union of convex slabs, so what we
+        // want is where the axis first reaches daylight - the near face of the
+        // hood - and not the last edge the ray happens to cross on the far side.
+        const out = bodyExit(paint, root, ux, uy, s * BURST_SPAN);
+        const face = { x: root.x + ux * out, y: root.y + uy * out };
+        const mouth = { x: face.x - ux * s * BURST_BACK, y: face.y - uy * s * BURST_BACK };
+        const tip = { x: face.x + ux * run, y: face.y + uy * run };
+        const clear = coneClear(face, mouthR, tip, tipW);
+        // MEASURED, not assumed: how much of the drawn near cap lands on painted
+        // bodywork. A candidate whose near end is not welded to the hood is worth
+        // more cost than any amount of rider overlap, because fire detached from
+        // the kart is the failure that reads from across the room.
+        const onBody = bodyOverlap(paint, mouth, ux, uy, mouthR);
+        const cost = Math.max(0, BURST_ON_BODY - onBody) * 40
+          + Math.max(0, JET_CLEAR - clear) * 10 + Math.abs(rot) * 3 + ai * 0.42;
+        if (!best || cost < best.cost) best = { root, face, mouth, tip, clear, cost, onBody, ux, uy };
       }
     }
     // ...and if even the shortest lean cannot clear the character (they are
     // leaning across the hood on a hard turn), the puff is shortened until it
     // does: a stub of fire at the nose beats fire painted over the rider.
     let tip = best.tip;
-    for (let i = 0; i < 5 && coneClear(best.a.mouth, mouthW, tip, mouthW * 1.3) < JET_CUT; i++) {
-      tip = { x: best.a.mouth.x + (tip.x - best.a.mouth.x) * 0.7, y: best.a.mouth.y + (tip.y - best.a.mouth.y) * 0.7 };
+    for (let i = 0; i < 5 && coneClear(best.face, mouthR, tip, tipW) < JET_CUT; i++) {
+      tip = { x: best.face.x + (tip.x - best.face.x) * 0.7, y: best.face.y + (tip.y - best.face.y) * 0.7 };
+    }
+    // ...and the SAME treatment for the HUD. This layer is clipped along the HUD
+    // safe zones, so a plume aimed into the minimap column is not blended away -
+    // it is guillotined, and a hard vertical edge through the middle of a flame
+    // is the one artefact no amount of blur can hide. On a hard right-hander the
+    // hero's nose points straight at that column, so the puff is walked back down
+    // its own axis until the shape it draws stops short of the cut. It is never
+    // shortened to nothing: a stub of fire on the hood still reads as a muzzle
+    // burst, and what little of the outer halo is left over the line is faint
+    // enough to have no visible edge.
+    {
+      const room = (f) => {
+        const px = best.face.x + (tip.x - best.face.x) * f;
+        const py = best.face.y + (tip.y - best.face.y) * f;
+        const pad = (mouthR + (tipW - mouthR) * f) * 0.45 + 8;
+        for (const z of HUD_ZONES) {
+          if (px > z.x - 24 - pad && px < z.x + z.w + 24 + pad
+            && py > z.y - 24 - pad && py < z.y + z.h + 24 + pad) return false;
+        }
+        return true;
+      };
+      let keep = 1;
+      while (keep > 0.24 && !(room(keep) && room(keep * 0.62))) keep -= 0.06;
+      keep = Math.max(0.24, keep);
+      if (keep < 1) {
+        tip = {
+          x: best.face.x + (tip.x - best.face.x) * keep,
+          y: best.face.y + (tip.y - best.face.y) * keep,
+        };
+      }
     }
     return {
+      // The near cap is centred BEHIND the hood's forward face, so the shape's
+      // flat near edge is buried under the paint and what shows is fire welling
+      // up out of the bodywork. Widest at that face and only a shade wider at the
+      // tip: a puff blooming off the hood, not a torch standing out of it.
       cone: {
-        x0: best.a.root.x, y0: best.a.root.y, r0: mouthW,
-        x1: tip.x, y1: tip.y, r1: mouthW * 1.3,
+        x0: best.mouth.x, y0: best.mouth.y, r0: mouthR,
+        x1: tip.x, y1: tip.y, r1: tipW,
         clock: b.life,
+        // Painted by `flamePuff`, not `flameCone`: a chain of soft, jittering
+        // blobs that bulges just off the hood and thins to a wisp, rather than a
+        // hard-edged hull between two circles. A muzzle burst has no victim to
+        // terminate on, so nothing about it should read as solid.
+        puff: true,
       },
       dz: fromZ + 40,
       tip: null,
       dry: true,
+      // A dry puff is NOT cut out along the bodywork: it sits on the hood, in
+      // front of it, which is the whole difference between fire coming out of
+      // the kart and a bar of fire hanging beside it. (The rider, the HUD and
+      // nearer karts are still cut out - see drawOrdnance.)
+      noBodyClip: true,
       target: null,
-      clear: coneClear(best.a.mouth, mouthW, tip, mouthW * 1.3),
+      clear: coneClear(best.face, mouthR, tip, tipW),
+      // The measured overlap, and the boolean the critic's gate reads: is the
+      // DRAWN near end of this puff on painted bodywork?
+      onBody: paint.length ? best.onBody >= BURST_ON_BODY : null,
+      bodyOverlap: paint.length ? best.onBody : null,
+      mouth: best.face,
     };
   }
 
@@ -975,6 +1312,19 @@ function drawOrdnance(view3, race, w, h, t, occ) {
           r1: Math.round(plume.cone.r1),
         },
         clear: plume.clear == null ? null : +plume.clear.toFixed(2),
+        // Is the root of the shot ON our own drawn bodywork? Measured against the
+        // very polygon that is cut out of this layer below, so it answers the only
+        // question that matters for a dry burst: does the fire leave the kart, or
+        // float beside it?
+        onBody: plume.onBody == null ? null : !!plume.onBody,
+        // ...and the measurement behind it: the share of the drawn near cap that
+        // lands on painted bodywork.
+        bodyOverlap: plume.bodyOverlap == null ? null : +plume.bodyOverlap.toFixed(2),
+        mouth: plume.mouth ? { x: Math.round(plume.mouth.x), y: Math.round(plume.mouth.y) } : null,
+        // The body as it is really cut out: a LIST of convex pieces whose union
+        // is the chassis (one convex hull over the whole kart floats above the
+        // concave hood - see HULL_PARTS).
+        hull: kartHullParts(rig).map((poly) => poly.map((p) => [Math.round(p.x), Math.round(p.y)])),
         hit: plume.tip ? { x: Math.round(plume.tip.x), y: Math.round(plume.tip.y), s: Math.round(plume.tip.s), src: plume.tip.src } : null,
         shift: plume.shift == null ? null : +plume.shift.toFixed(2),
         from: { x: Math.round(from.x), y: Math.round(from.y), s: Math.round(from.s) },
@@ -1027,17 +1377,20 @@ function drawOrdnance(view3, race, w, h, t, occ) {
     tracePlaneEllipse(c, rig, RIDER_Y, RIDER_Z, RIDER_RX, RIDER_RY);
     c.clip('evenodd');
 
-    // Third clip: our own BODYWORK. The mouth sits over the hood tip, which is
-    // the FURTHEST point of our kart from the chase camera, so any part of the
-    // flame that lands on the deck or the flanks is behind them and must not be
-    // painted. The cut is the projected hull of the body itself, so the fire
-    // licks over the hood line exactly where the hood ends.
-    c.beginPath();
-    c.rect(0, 0, STAGE_W, STAGE_H);
-    traceKartHull(c, rig);
-    c.clip('evenodd');
+    // Third clip: our own BODYWORK - but only for a plume that RUNS DOWN THE
+    // ROAD. Its mouth sits at the hood tip, the furthest point of our kart from
+    // the chase camera, so any part of it that lands on the deck or the flanks is
+    // behind the kart and must not be painted.
+    //
+    // A dry muzzle burst is the opposite case and opts out (`noBodyClip`): it is
+    // a puff of fire ON the front bodywork, aimed up the road, and its near cap is
+    // deliberately parked under the hood's screen-forward face. Cutting it along
+    // the hood line is precisely what used to leave the drawn near end hanging in
+    // mid-air over the grass beside the kart.
+    if (!plume.noBodyClip) clipKartHull(c, rig);
 
-    paint.flameCone(c, plume.cone, t01);
+    if (plume.cone.puff) paint.flamePuff(c, plume.cone, t01);
+    else paint.flameCone(c, plume.cone, t01);
     c.restore();
   }
 }

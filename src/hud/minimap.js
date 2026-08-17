@@ -17,13 +17,30 @@ import { racerOr } from '../data/roster.js';
 import { creatureMarkup } from '../core/avatars.js';
 import { buildRoute, pointAtLength, spreadAlong } from './route.js';
 
-/* Ribbon + chip metrics, in the route's 0..100 space.
-   `edge` is the pale ribbon's stroke width - the reference's "thin white circuit
-   line" - and every chip is sized against it: a rival marker's outer disc is
-   ~0.8x that width and the player's is ~1.0x, so markers hug the line instead of
-   swallowing it. RIM/HALO are the white/gold ring thicknesses added on top. */
-const RIBBON = { edge: 10.6, fill: 8.8, gloss: 3.4 };
-const CHIP = { rival: 3.35, player: 3.65, rim: 0.85, halo: 1.25 };
+/* Ribbon + chip metrics, in the route's 0..100 space (the card is 320px wide
+   over a 96-unit viewBox, so 1 unit = 3.33px).
+
+   The reference minimap is a *hairline circuit*, not a road: its bright line is
+   ~5% of the map's width, with the whole casing under 8%. So:
+     fill   4.4u = 14.7px = 4.6% of 320  <- the bright white line itself
+     edge   5.4u = 18.0px = 5.6%         <- pale grey shoulder
+     casing 6.7u = 22.3px = 7.0%         <- dark outline, total footprint
+   `casing` is what keeps the route readable on Mt Coronet's snow field (a pale
+   line alone goes white-on-white there), so it stays - just thin, hugging the
+   edge instead of doubling the ribbon.
+
+   Every chip is sized against `edge` so the map reads as small markers riding a
+   line, 1:1 with it: a rival's outer disc is 1.0x the pale line's width (18px)
+   and the player's ~1.26x (bigger on purpose, so the player reads at a glance).
+   RIM/HALO are the white/gold ring thicknesses added on top of the core radius,
+   and `STROKE` scales the hairline outlines inside a chip with everything else. */
+const RIBBON = { edge: 5.4, fill: 4.4, gloss: 1.7, casing: 6.7, mid: 5.95 };
+const CHIP = { rival: 2.25, player: 2.45, rim: 0.45, halo: 0.5, stroke: 0.28 };
+/* The start-line flag art below is drawn 8.4 units wide, which matched the old
+   fat 13.5-unit casing; scale it with the ribbon so the flag never outgrows the
+   line it sits on (its stroke weights thin down with it, which is the point). */
+const FLAG_SCALE = RIBBON.casing / 13.5;
+
 /** Outer radius actually painted for a chip (what de-overlap must respect). */
 export function chipRadius(isPlayer) {
   return isPlayer ? CHIP.player + CHIP.rim + CHIP.halo : CHIP.rival + CHIP.rim;
@@ -111,19 +128,20 @@ function chipMarkup(def, r, isPlayer) {
   const fo = -r + (12 / 90) * (r * 2);
   const face = `<svg x="${fo.toFixed(2)}" y="${(fo + r * 0.06).toFixed(2)}" width="${fw.toFixed(2)}" height="${fw.toFixed(2)}"
       viewBox="20 26 60 60">${creatureMarkup(def)}</svg>`;
+  const sw = CHIP.stroke.toFixed(2);
   if (isPlayer) {
     return `<circle r="${(r + CHIP.rim + CHIP.halo).toFixed(2)}" fill="#ffd63b"/>
       <circle r="${(r + CHIP.rim).toFixed(2)}" fill="#ffffff"/>
       <circle r="${r.toFixed(2)}" fill="${k.fill}"/>
       ${face}
-      <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".5" opacity=".7"/>
-      <circle r="${(r + CHIP.rim + CHIP.halo).toFixed(2)}" fill="none" stroke="#8a5f05" stroke-width=".7" opacity=".85"/>`;
+      <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width="${sw}" opacity=".7"/>
+      <circle r="${(r + CHIP.rim + CHIP.halo).toFixed(2)}" fill="none" stroke="#8a5f05" stroke-width="${(CHIP.stroke * 1.3).toFixed(2)}" opacity=".85"/>`;
   }
   return `<circle r="${(r + CHIP.rim).toFixed(2)}" fill="#ffffff"/>
     <circle r="${r.toFixed(2)}" fill="${k.fill}"/>
     ${face}
-    <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width=".5" opacity=".6"/>
-    <circle r="${(r + CHIP.rim).toFixed(2)}" fill="none" stroke="rgba(28,38,62,.55)" stroke-width=".6"/>`;
+    <circle r="${r.toFixed(2)}" fill="none" stroke="${k.rim}" stroke-width="${sw}" opacity=".6"/>
+    <circle r="${(r + CHIP.rim).toFixed(2)}" fill="none" stroke="rgba(28,38,62,.6)" stroke-width="${(CHIP.stroke * 1.15).toFixed(2)}"/>`;
 }
 
 /**
@@ -188,12 +206,12 @@ export function minimapSvg(track, race, width = 300) {
     <!-- Dark casing under the ribbon. Without it the pale grey edge below
          vanishes against Mt Coronet's snow field, where the whole route reads
          as white-on-white; this keeps the map legible on every track theme. -->
-    <path d="${d}" fill="none" stroke="rgba(20,28,46,.42)" stroke-width="${RIBBON.edge + 2.9}" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${d}" fill="none" stroke="#5d6b83" stroke-width="${RIBBON.edge + 1.0}" stroke-linejoin="round" stroke-linecap="round" opacity=".75"/>
+    <path d="${d}" fill="none" stroke="rgba(20,28,46,.55)" stroke-width="${RIBBON.casing}" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${d}" fill="none" stroke="#5d6b83" stroke-width="${RIBBON.mid}" stroke-linejoin="round" stroke-linecap="round" opacity=".8"/>
     <path d="${d}" fill="none" stroke="#b3bdcd" stroke-width="${RIBBON.edge}" stroke-linejoin="round" stroke-linecap="round"/>
     <path d="${d}" fill="none" stroke="#eef2f8" stroke-width="${RIBBON.fill}" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${d}" fill="none" stroke="#ffffff" stroke-width="${RIBBON.gloss}" stroke-linejoin="round" stroke-linecap="round" opacity=".5"/>
-    <g transform="translate(${sx.toFixed(2)},${sy.toFixed(2)}) rotate(${ang.toFixed(1)})">
+    <path d="${d}" fill="none" stroke="#ffffff" stroke-width="${RIBBON.gloss}" stroke-linejoin="round" stroke-linecap="round" opacity=".6"/>
+    <g transform="translate(${sx.toFixed(2)},${sy.toFixed(2)}) rotate(${ang.toFixed(1)}) scale(${FLAG_SCALE.toFixed(3)})">
       <rect x="-4.2" y="-2" width="8.4" height="4" rx=".8" fill="#fff" stroke="#5b6779" stroke-width=".7"/>
       <path d="M-4.2 -2h2.1v1.33h2.1v1.34h2.1v1.33h-2.1v-1.33h-2.1v1.33h-2.1z" fill="#59677c" opacity=".85"/>
     </g>

@@ -52,4 +52,21 @@ oversized, pickup-pop ring lands on the kart deck.
 long-run; determinism byte-identical; no regressions. Known cosmetic leftovers: Charmander/Blaziken
 muzzle silhouettes, minimap ribbon weight, dry-burst offset on hard bends, Ditto's nubs.
 
+## Round 4 (run `wf_bd49fc64-ae1`, finished 2026-08-18 · 15 agents · ~1.8M tokens · round cap 10)
+
+**Clean sweep — all four loops WIN:**
+
+| Piece | Rounds | Verdict | Win-note residual |
+|---|---|---|---|
+| podium-silhouettes | 2 | **WINS** | Garchomp's head slab escaped the sweep; Blaziken torso plates busy |
+| minimap-ribbon | 1 | **WINS** | player chip could be ~1.4x rivals for instant "you are here" |
+| kart-shell-sculpt | 1 | **WINS** | loft has low-poly dents; rear cowl reads as a block |
+| beam-dry-burst | 3 | **WINS** | burst is a static lozenge; wants halo/flicker |
+
+**Verify pass 4: PASS.** Zero console errors across full flow + 13-URL sweep, determinism
+byte-identical, no regressions. Pre-existing bugs documented (not from these fixes): road/kerb
+quad projection explodes into a full-width color bar for a frame at crests (repro:
+ryme-city `rolling=1` + `step(5200)`, `verify4-17/19` shots) — flagged for follow-up; item
+banner briefly covered by the muzzle burst; wet-floor reflection crosshatch at the near plane.
+
 Round-by-round history: [gauntlet/log.md](gauntlet/log.md). Evidence shots: `gauntlet/shots/` (untracked).

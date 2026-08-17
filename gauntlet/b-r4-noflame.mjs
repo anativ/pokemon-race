@@ -1,0 +1,13 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+await page.goto(url + '/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam&pos=1');
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(() => window.__pkr.step(6000));
+await page.evaluate(() => window.__pkr.step(100));
+await page.waitForTimeout(80);
+await page.screenshot({ path: 'gauntlet/shots/b-r4-noflame.png' });
+await browser.close(); await close();
+console.log('ok');

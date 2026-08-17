@@ -1,0 +1,12 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
+await page.goto(`${url}/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam&pos=1`);
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(() => window.__pkr.step(6100));
+await page.waitForTimeout(70);
+await page.screenshot({ path: 'gauntlet/shots/r5-nofire.png', clip: { x: 980, y: 620, width: 620, height: 280 } });
+console.log('ok');
+await browser.close(); await close();

@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+import { serveRepo } from '../tools/screenshot.mjs';
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1600, height: 900 } });
+const probs=[]; p.on('console',m=>{if(m.type()==='error')probs.push(m.text())}); p.on('pageerror',e=>probs.push(String(e)));
+await p.goto(origin+'/index.html?screen=race&track=ryme-city&racer=gengar&lap=2&pos=3&rolling=1');
+await p.waitForFunction(()=>window.__pkr&&window.__pkr.isReady===true);
+await p.evaluate(()=>window.__pkr.step(5200));
+await p.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+await p.screenshot({path:'gauntlet/shots/verify4-05-race-neon.png'});
+const box = await p.evaluate(()=>{const el=document.querySelector('#pkr-layer-hud');const cands=[...document.querySelectorAll('*')].filter(e=>/mini|map|route/i.test(e.className+' '+e.id));return cands.map(e=>({id:e.id,cls:String(e.className),r:e.getBoundingClientRect().toJSON()}))});
+console.log(JSON.stringify(box,null,1).slice(0,1200));
+await b.close(); await close();
+console.log(probs.length?'PROBLEMS '+probs.join('|'):'clean');

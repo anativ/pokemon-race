@@ -1,0 +1,16 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
+await page.goto(`${url}/index.html?screen=race&track=pallet-town&racer=pikachu&item=hyper-beam&pos=1`);
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(() => window.__pkr.step(6000));
+await page.keyboard.press('Space');
+await page.evaluate(() => window.__pkr.step(450));
+await page.waitForTimeout(60);
+const b = await page.evaluate(() => window.__pkrBeam);
+const cx = (b.cone.x0 + b.cone.x1) / 2, cy = (b.cone.y0 + b.cone.y1) / 2;
+await page.screenshot({ path: 'gauntlet/shots/r5-late.png', clip: { x: Math.max(0, Math.min(980, cx - 310)), y: Math.max(0, Math.min(460, cy - 220)), width: 620, height: 440 } });
+console.log('ok', JSON.stringify(b.cone));
+await browser.close(); await close();

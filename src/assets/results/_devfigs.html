@@ -6,6 +6,10 @@
   .row { display:flex; flex-wrap:wrap; gap:6px; padding:10px; }
   .cell { text-align:center; }
   .cell b { display:block; font-size:13px; letter-spacing:.08em; }
+  /* ?sil=1 : flatten every figure to a black silhouette on white, which is how
+     the podium critic checks that muzzles/beaks break the skull contour. */
+  body.sil { background:#fff; color:#333; }
+  body.sil svg { filter: brightness(0); }
 </style>
 <div class="row" id="row"></div>
 <script type="module">
@@ -14,6 +18,7 @@
   const q = new URLSearchParams(location.search);
   const only = (q.get('ids') || '').split(',').filter(Boolean);
   const h = Number(q.get('h') || 210);
+  if (q.get('sil')) document.body.classList.add('sil');
   const list = only.length ? only.map((id) => roster.find((r) => r.id === id)).filter(Boolean) : roster;
   document.getElementById('row').innerHTML = list.map((r) =>
     `<div class="cell">${podiumFigureSvg(r, { height: h })}<b>${r.name}</b></div>`).join('');

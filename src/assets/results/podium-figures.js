@@ -20,17 +20,25 @@
  * apart as pure black silhouettes - that is the bar.
  *
  * ON-MODEL RULES (round 5 - the fix for "misaligned flat primitives"):
- *  1. FACES ARE FRONT ON. A muzzle is drawn with `snout()` CENTRED on x=60 and
- *     sunk into the skull, never as an ellipse bolted onto one side of the head
- *     (that reads as a creature turning away mid-photo, and it made every
- *     dragon look like a mouse with a snout growing out of its cheek).
+ *  1. A MUZZLE IS PART OF THE HEAD'S OUTLINE, NOT A SHAPE ON TOP OF IT.
+ *     Round 4 law: any species with a snout, muzzle or beak builds its head
+ *     with `keyholeHead()`, which emits the cranium AND the muzzle as ONE
+ *     closed contour that steps IN at the cheeks and swells back OUT for the
+ *     muzzle. Stacking a second closed muzzle mass over a closed skull ball is
+ *     BANNED: it leaves the silhouette an unbroken ball and turns the seam into
+ *     a "printed pig nose" or a "detached jaw bib". Species that genuinely have
+ *     no muzzle (Pikachu, Celebi, Jigglypuff, Gengar, Ditto) get no muzzle
+ *     shape at all - not even a printed one.
+ *     Faces are still FRONT ON: `keyholeHead` is symmetric about x=60.
  *  2. FACE FEATURES COME IN PAIRS. Eyes, catchlights, nostrils, cheeks, horns
  *     and ears are emitted by symmetric helpers (`eyes`, `nostrils`, `blush`,
  *     `hornPair`) so a left/right mismatch is not expressible.
- *  3. LIMBS ARE FUSED, NOT BOLTED. `limb()` buries its shoulder end deep inside
- *     the torso as a FILL WITH NO STROKE and strokes only its outer contour
+ *  3. LIMBS ARE FUSED, NOT BOLTED. `limb()` buries its shoulder end inside the
+ *     torso as a tapered CONE with no stroke and strokes only its outer contour
  *     from the body edge outward, so no keyline ever slashes across the chest
- *     and no arm can read as a detached rounded rectangle. The hand is drawn
+ *     and no arm can read as a detached rounded rectangle. The root cone can
+ *     never be wider than the deltoid it closes off, which is what killed the
+ *     pair of triangular "shoulder spikes" shallow burials used to throw. The hand is drawn
  *     over the wrist so the two are one continuous mass, and claws are short
  *     and broad - never toothpicks.
  *  4. VOLUME COMES FROM THE PASSES, not from outlines: every pose is replayed
@@ -108,9 +116,15 @@ function limb(x1, y1, x2, y2, w, c, capR = 0, hand = null, bury = 1.9) {
   const ux = dx / L; const uy = dy / L;
   const nx = -uy; const ny = ux;
   // Root the shoulder a full limb-width back into the body mass.
-  const sx = x1 - ux * w * bury; const sy = y1 - uy * w * bury;
-  const h0 = w * 0.9;    // inside the torso: wide, so the union is seamless
-  const h1 = w * 0.74;   // deltoid
+  // Round-4 fix: a SHALLOW root used to leave the root plane's two corners
+  // sticking out past the shoulder as triangular spikes (charmander bury=0.34
+  // threw a pair of them). The root is now a buried CONE that never gets wider
+  // than the deltoid, and it is always sunk at least ~1 limb-width in, so it
+  // still covers the torso keyline it is meant to hide.
+  const bu = Math.max(bury, 0.95);
+  const sx = x1 - ux * w * bu; const sy = y1 - uy * w * bu;
+  const kx = x1 - ux * w * bu * 0.5; const ky = y1 - uy * w * bu * 0.5; // root mid
+  const h1 = w * 0.74;   // deltoid - also the widest the buried root may get
   const h2 = w * 0.5;    // elbow
   const h3 = capR ? w * 0.4 : w * 0.42; // wrist
   const mx = x1 + ux * L * 0.5; const my = y1 + uy * L * 0.5;
@@ -118,17 +132,17 @@ function limb(x1, y1, x2, y2, w, c, capR = 0, hand = null, bury = 1.9) {
   const pt = (px, py, h, s) => `${r(px + nx * h * s)} ${r(py + ny * h * s)}`;
   const tip = `Q${pt(x2, y2, h3 * 0.92, 1)} ${r(x2 + ux * h3 * 0.4)} ${r(y2 + uy * h3 * 0.4)}`
     + ` Q${pt(x2, y2, h3 * 0.92, -1)} ${pt(ex, ey, h3, -1)}`;
-  // Closed FILL only - its proximal end is buried in the torso, and because it
-  // carries no stroke there is no keyline slashing across the chest.
-  const fill = `M${pt(sx, sy, h0, 1)}`
-    + ` C${pt(x1, y1, h1 * 1.02, 1)} ${pt(mx, my, h2 * 0.98, 1)} ${pt(ex, ey, h3, 1)}`
-    + ` ${tip}`
-    + ` C${pt(mx, my, h2 * 0.98, -1)} ${pt(x1, y1, h1 * 1.02, -1)} ${pt(sx, sy, h0, -1)} Z`;
   // OPEN stroke: only the outer contour, starting AT the body edge.
   const edge = `M${pt(x1, y1, h1, 1)}`
     + ` C${pt(x1 + ux * L * 0.3, y1 + uy * L * 0.3, h2 * 1.02, 1)} ${pt(mx, my, h2, 1)} ${pt(ex, ey, h3, 1)}`
     + ` ${tip}`
     + ` C${pt(mx, my, h2, -1)} ${pt(x1 + ux * L * 0.3, y1 + uy * L * 0.3, h2 * 1.02, -1)} ${pt(x1, y1, h1, -1)}`;
+  // Closed FILL: exactly the stroked contour, closed off by a cone that tapers
+  // to a point INSIDE the body. It carries no stroke, so no keyline slashes the
+  // chest, and it can never be wider than the contour it closes -> no spikes.
+  const fill = `${edge}`
+    + ` C${pt(kx, ky, h1 * 0.9, -1)} ${pt(sx, sy, h1 * 0.28, -1)} ${r(sx)} ${r(sy)}`
+    + ` C${pt(sx, sy, h1 * 0.28, 1)} ${pt(kx, ky, h1 * 0.9, 1)} ${pt(x1, y1, h1, 1)} Z`;
   const side = x2 < x1 ? -1 : 1;
   // Arm first, hand ON TOP of the wrist: the hand's own keyline reads, and its
   // root is hidden under the forearm, so the two are one continuous mass.
@@ -149,12 +163,14 @@ function claw3(x, y, r, c, s = 1) {
   const q = (n) => Math.round(n * 100) / 100;
   const R = r * 1.16;
   // three stubby cone talons, hanging down/outward from the paw's rim
+  // Round 4: these used to taper to needle points, which read at podium scale
+  // as sharp pale slivers dripping off the paw. They are now BLUNT nubs whose
+  // outline is one rounded arc - a claw, not a spike.
   const t = (a) => {
-    const bx = x + a * R * 0.56; const by = y + R * 0.5;
-    const tip = R * 0.34;
-    return `M${q(bx - R * 0.34)} ${q(by - R * 0.2)}`
-      + ` Q${q(bx + a * R * 0.2)} ${q(by + tip * 0.6)} ${q(bx + a * R * 0.24)} ${q(by + tip)}`
-      + ` Q${q(bx + a * R * 0.04)} ${q(by + tip * 0.5)} ${q(bx + R * 0.34)} ${q(by - R * 0.2)} Z`;
+    const bx = x + a * R * 0.56; const by = y + R * 0.34;
+    const w = R * 0.32; const drop = R * 0.46;
+    return `M${q(bx - w)} ${q(by)}`
+      + ` C${q(bx - w)} ${q(by + drop)} ${q(bx + w)} ${q(by + drop)} ${q(bx + w)} ${q(by)} Z`;
   };
   return p(t(-1), '#f7f2e4', OUT, 1.6) + p(t(0.02), '#f7f2e4', OUT, 1.6) + p(t(1), '#f7f2e4', OUT, 1.6)
     // palm mass: a soft rounded wedge, wider than it is tall
@@ -514,6 +530,93 @@ function snout(cx, y, w, h, c, under) {
     under) : '');
 }
 
+/* ------------------------------------------------------- KEYHOLE HEAD
+ * THE structural fix for "the muzzle is printed on a ball". Every earlier
+ * attempt drew the skull and then laid a second closed muzzle shape over it, so
+ * the silhouette stayed an unbroken ball and the only thing that read was the
+ * seam where the two shapes met (a "detached jaw plate" / "printed beak band").
+ *
+ * `keyholeHead` emits the cranium AND the muzzle as ONE closed contour:
+ *
+ *        .-''''''-.        cranium dome (half-width `cw` at y=`cy`)
+ *       /          \
+ *      |            |
+ *       \.        ./      cheeks fall back and step IN (concave) to a
+ *         \      /        pinch of half-width `pinch` at y=`py`
+ *          |    |
+ *         /      \        the muzzle then swells back OUT past that pinch
+ *        |        |       (convex, half-width `mw` at y=`my`) and closes off
+ *         \.____./        at y=`mb`
+ *
+ * Because the outline itself inflects, the muzzle protrudes past the skull
+ * contour in the ink pass AND in the hull silhouette, and there is no seam to
+ * read as a bib. `mw` is force-clamped above `pinch`, so no caller can
+ * accidentally regress to a taper (which is what reads as a chin).
+ *
+ * @param {object} o {cx,crown,cy,cw,py,pinch,my,mw,mb,c} plus:
+ *   floor  'round' (mammal/reptile snout) | 'wedge' (beak)
+ *   under  optional pale lower-jaw colour, filled INSIDE the contour
+ *   lip    0..1 - where on the muzzle the pale jaw starts (default .42)
+ */
+function keyholeHead(o) {
+  const q = (v) => Math.round(v * 100) / 100;
+  const cx = o.cx === undefined ? 60 : o.cx;
+  const { crown, cy, cw, py, my, mb } = o;
+  const pinch = Math.min(o.pinch, cw * 0.9);
+  // HARD RULE: the muzzle must out-swell the cheek pinch, or it is a chin.
+  const mw = Math.max(o.mw, pinch * 1.2);
+  const dc = py - cy; const dm = my - py; const df = mb - my;
+  const wedge = o.floor === 'wedge';
+  const floor = (a) => (wedge
+    ? ` C${q(cx + a * mw * 0.82)} ${q(my + df * 0.26)} ${q(cx + a * mw * 0.2)} ${q(mb - df * 0.16)} ${q(cx)} ${q(mb)}`
+    : ` C${q(cx + a * mw)} ${q(my + df * 0.62)} ${q(cx + a * mw * 0.62)} ${q(mb)} ${q(cx)} ${q(mb)}`);
+  const cheek = (a) => ` C${q(cx + a * cw)} ${q(cy + dc * 0.52)}`
+    + ` ${q(cx + a * pinch * 1.05)} ${q(py - dc * 0.2)} ${q(cx + a * pinch)} ${q(py)}`;
+  const jowl = (a) => ` C${q(cx + a * pinch * 1.02)} ${q(py + dm * 0.42)}`
+    + ` ${q(cx + a * mw)} ${q(my - dm * 0.46)} ${q(cx + a * mw)} ${q(my)}`;
+  // the mirrored half runs bottom -> top, so it is walked back up explicitly
+  const up =` C${q(cx - mw * (wedge ? 0.3 : 0.62))} ${q(wedge ? mb - df * 0.2 : mb)}`
+    + ` ${q(cx - mw * (wedge ? 0.9 : 1))} ${q(my + df * (wedge ? 0.3 : 0.62))} ${q(cx - mw)} ${q(my)}`
+    + ` C${q(cx - mw)} ${q(my - dm * 0.46)} ${q(cx - pinch * 1.02)} ${q(py + dm * 0.42)} ${q(cx - pinch)} ${q(py)}`
+    + ` C${q(cx - pinch * 1.05)} ${q(py - dc * 0.2)} ${q(cx - cw)} ${q(cy + dc * 0.52)} ${q(cx - cw)} ${q(cy)} Z`;
+  const head = `M${q(cx - cw)} ${q(cy)}`
+    + ` C${q(cx - cw)} ${q(crown + (cy - crown) * 0.2)} ${q(cx - cw * 0.62)} ${q(crown)} ${q(cx)} ${q(crown)}`
+    + ` C${q(cx + cw * 0.62)} ${q(crown)} ${q(cx + cw)} ${q(crown + (cy - crown) * 0.2)} ${q(cx + cw)} ${q(cy)}`
+    + cheek(1) + jowl(1) + floor(1) + up;
+  // Optional SECOND COLOUR for the muzzle mass (a gold beak, a cream snout).
+  // It is an UNSTROKED inset of the very same contour, so the muzzle's outline
+  // IS the head's outline: the colour change reads as a material change on one
+  // mass, never as a second shape printed on the face.
+  const inset = o.inset === undefined ? 1.3 : o.inset;
+  let mz = '';
+  if (o.muzzle) {
+    const pw = pinch - inset * 0.5; const mwi = mw - inset; const mbi = mb - inset * 1.15;
+    const pyi = py + inset * 0.6;
+    const dmi = my - pyi; const dfi = mbi - my;
+    const dn = (a) => (wedge
+      ? ` C${q(cx + a * mwi * 0.82)} ${q(my + dfi * 0.26)} ${q(cx + a * mwi * 0.2)} ${q(mbi - dfi * 0.16)} ${q(cx)} ${q(mbi)}`
+      : ` C${q(cx + a * mwi)} ${q(my + dfi * 0.62)} ${q(cx + a * mwi * 0.62)} ${q(mbi)} ${q(cx)} ${q(mbi)}`);
+    const upFloor = (wedge
+      ? ` C${q(cx + mwi * 0.2)} ${q(mbi - dfi * 0.16)} ${q(cx + mwi * 0.82)} ${q(my + dfi * 0.26)} ${q(cx + mwi)} ${q(my)}`
+      : ` C${q(cx + mwi * 0.62)} ${q(mbi)} ${q(cx + mwi)} ${q(my + dfi * 0.62)} ${q(cx + mwi)} ${q(my)}`);
+    mz = pf(`M${q(cx - pw)} ${q(pyi)}`
+      + ` C${q(cx - pw * 1.02)} ${q(pyi + dmi * 0.42)} ${q(cx - mwi)} ${q(my - dmi * 0.46)} ${q(cx - mwi)} ${q(my)}`
+      + dn(-1) + upFloor
+      + ` C${q(cx + mwi)} ${q(my - dmi * 0.46)} ${q(cx + pw * 1.02)} ${q(pyi + dmi * 0.42)} ${q(cx + pw)} ${q(pyi)}`
+      + ` Q${q(cx)} ${q(pyi - dmi * 0.24)} ${q(cx - pw)} ${q(pyi)} Z`, o.muzzle);
+  }
+  // pale lower jaw: inset from the contour so the keyline survives, and it only
+  // ever covers the BOTTOM of the muzzle, so it cannot read as a hanging bib.
+  const lip = o.lip === undefined ? 0.42 : o.lip;
+  const uy = my + df * lip;
+  const uw = mw * (1 - lip * (wedge ? 0.72 : 0.34)) - 1.4; const ub = mb - 1.6;
+  const under = o.under ? pf(`M${q(cx - uw)} ${q(uy)}`
+    + ` C${q(cx - uw)} ${q(uy + (ub - uy) * 0.66)} ${q(cx - uw * 0.6)} ${q(ub)} ${q(cx)} ${q(ub)}`
+    + ` C${q(cx + uw * 0.6)} ${q(ub)} ${q(cx + uw)} ${q(uy + (ub - uy) * 0.66)} ${q(cx + uw)} ${q(uy)}`
+    + ` Q${q(cx)} ${q(uy - (ub - uy) * 0.42)} ${q(cx - uw)} ${q(uy)} Z`, o.under) : '';
+  return p(head, o.c, OUT, o.sw === undefined ? 2.6 : o.sw) + mz + under;
+}
+
 /** Symmetric nostril pair. */
 const nostrils = (cx, y, dx, r = 1.8) =>
   ef(cx - dx, y, r, r * 0.82, OUT) + ef(cx + dx, y, r, r * 0.82, OUT);
@@ -603,7 +706,7 @@ export const KIT = {
   chunkyLegs, browRidge,
   paw, claw3, wyvernHand, stoutClaw, fist, webHand, padPaw, slimHand,
   eyes, dotEyes, reptileEyes, smile, closedEyes, gloss, teeth,
-  snout, nostrils, grin, hornPair, blush, batWing,
+  keyholeHead, snout, nostrils, grin, hornPair, blush, batWing,
 };
 
 /* ======================================================= species palettes
@@ -714,14 +817,17 @@ POSE.charizard = (c) => ''
   // symmetric pair read as insect antennae).
   + p('M68 2 Q84 -7 96 -6 Q84 1 76 12 Q71 8 68 2 Z', c.color)
   + pf('M74 1 Q84 -4 93 -5 Q84 0 78 8 Q76 4 74 1 Z', c.accent)
-  // HEAD: ONE tapering wedge - broad brow narrowing to a pointed snout. Drawn
-  // as a single path so no "muzzle plate" is ever bolted onto a round skull.
-  + p('M42 12 C42 -1 50 -7 60 -7 C70 -7 78 -1 78 12 C78 21 75 27 71 32'
-    + ' C69 38 66 43 60 43 C54 43 51 38 49 32 C45 27 42 21 42 12 Z', c.color)
-  + pf('M53 31 C54 38 56 43 60 43 C64 43 66 38 67 31 C64 35 56 35 53 31 Z', c.belly)
-  + ln('M50 29 C54 36 66 36 70 29', OUT, 2.2)
-  + teeth(60, 34, 6, 2)
-  + ef(58.1, 38.5, 1.1, 1.4, OUT) + ef(61.9, 38.5, 1.1, 1.4, OUT)
+  // HEAD: one keyhole contour - a SMALL cranium, cheeks stepping in hard, and a
+  // long wyvern SNOUT swelling back out past that pinch down to the jaw at
+  // y=43. Round 4: the old single wedge had no inflection at all, so front-on
+  // the snout was indistinguishable from a tapering skull.
+  + keyholeHead({
+    crown: -7, cy: 8, cw: 19, py: 22, pinch: 11.5, my: 31, mw: 15.2, mb: 43,
+    c: c.color, under: c.belly, lip: 0.4,
+  })
+  + ln('M50.5 29.5 C54 35.5 66 35.5 69.5 29.5', OUT, 2.2)
+  + teeth(60, 33, 5.6, 2)
+  + ef(58.1, 25.6, 1.1, 1.4, OUT) + ef(61.9, 25.6, 1.1, 1.4, OUT)
   + gloss(52, 4, 8, 4.6)
   + reptileEyes(51, 69, 16, 5.6, 4.2);
 
@@ -750,21 +856,19 @@ POSE.dragonite = (c) => ''
   // SYMMETRIC antennae, rooted behind the crown and curling outward
   + ln('M50 20 C40 8 36 2 31 -1 M70 20 C80 8 84 2 89 -1', c.color, 4.8)
   + e(29, -2, 5, 4.6, c.color) + e(91, -2, 5, 4.6, c.color)
-  // small round head sunk onto the shoulders, muzzle drawn ON the midline
-  + p('M38 32 C38 17 48 9 60 9 C72 9 82 17 82 32 C82 44 74 52 60 52'
-    + ' C46 52 38 44 38 32 Z', c.color)
+  // HEAD: small keyhole skull sunk onto the shoulders - cranium, cheeks
+  // stepping in, blunt MUZZLE swelling back out past the pinch. Round 4: the
+  // snout used to be a bump path printed entirely inside the skull ball.
+  + keyholeHead({
+    crown: 7, cy: 26, cw: 22, py: 39, pinch: 12, my: 47, mw: 16, mb: 58,
+    c: c.color, under: c.belly, lip: 0.46,
+  })
   // one blunt centred horn
   + p('M60 9 C58 2 58 -3 60 -8 C62 -3 62 2 62 9 Z', c.color)
   + p('M54 12 C56 3 58 -2 60 -8 C62 -1 63 4 65 12 Z', c.color)
-  // FACE (round 6 rebuild - the flat two-nostril PIG MUZZLE is gone):
-  // a short rounded snout bump that is NARROWER than the skull and sits high
-  // on it, a soft cream chin, hairline nostril slits instead of dark discs,
-  // and a wide friendly mouth whose corners run out past the snout.
-  + p('M51 32 C48 42 52 51 60 51 C68 51 72 42 69 32 C65 28 55 28 51 32 Z', c.color)
-  + pf('M53 43 C55 48 65 48 67 43 C64 46 56 46 53 43 Z', c.belly)
-  + ln('M56.6 36 q1.4 1.8 2.6 0 M60.8 36 q1.4 1.8 2.6 0', OUT, 1.5)
-  + ln('M45 40 C50 52 70 52 75 40', OUT, 2.8)
-  + ln('M60 51 v3', OUT, 1.6)
+  // hairline nostril slits and a wide friendly mouth, both ON the muzzle
+  + ln('M56.8 43 q1.4 1.8 2.6 0 M60.6 43 q1.4 1.8 2.6 0', OUT, 1.5)
+  + ln('M50 47.6 C54 55 66 55 70 47.6', OUT, 2.6)
   + gloss(50, 20, 11, 6)
   // BIG kind oval eyes set close under a soft brow - Dragonite's whole read
   + ef(50, 26, 5.6, 6.8, '#ffffff') + ef(70, 26, 5.6, 6.8, '#ffffff')
@@ -800,17 +904,19 @@ POSE.lucario = (c) => ''
   // two short aura sensors dangling off the back of the head
   + ln('M42 48 C33 56 30 66 32 74', c.accent, 4.6)
   + ln('M78 48 C87 56 90 66 88 74', c.accent, 4.6)
-  // SKULL: front on, tapering to the jaw
-  + p('M35 32 C35 16 46 8 60 8 C74 8 85 16 85 32 C85 46 77 57 60 57'
-    + ' C43 57 35 46 35 32 Z', c.color)
+  // HEAD: one keyhole contour - cranium, cheeks stepping in, jackal MUZZLE
+  // swelling back out past the pinch (round 4: the muzzle used to be a second
+  // shape printed inside a closed skull ball)
+  + keyholeHead({
+    crown: 8, cy: 27, cw: 25, py: 40, pinch: 15, my: 48, mw: 19.5, mb: 58,
+    c: c.color, under: c.belly, lip: 0.44,
+  })
   // two ear spikes swept up and back, symmetric
   + hornPair(60, 14, 17, 22, 12, c.color, c.accent)
   // narrow black bandit mask across the eyes only - the skull stays blue
-  + pf('M35 26 C50 33 70 32 85 27 C85 36 77 41 60 41 C43 41 36 35 35 26 Z', c.accent)
-  // CENTRED jackal muzzle with a black nose
-  + snout(60, 46, 12, 8, c.color, c.belly)
-  + ef(60, 41.5, 3.2, 2.6, OUT)
-  + grin(60, 49, 5.5)
+  + pf('M37 25 C50 31 70 30 83 26 C82 33 73 37 60 37 C47 37 38 33 37 25 Z', c.accent)
+  + ef(60, 45, 3.4, 2.8, OUT)
+  + grin(60, 51, 6)
   + ef(48, 32, 5, 4.4, '#e8433c') + ef(72, 32, 5, 4.4, '#e8433c')
   + ef(46.8, 30.6, 2.1, 2.1, '#ffd7d2') + ef(70.8, 30.6, 2.1, 2.1, '#ffd7d2');
 
@@ -875,10 +981,11 @@ POSE.pikachu = (c) => ''
   + gloss(48, 44, 13, 8)
   + ef(34, 68, 7.8, 7, '#e8433c') + ef(86, 68, 7.8, 7, '#e8433c')
   + dotEyes(49, 71, 53, 4.8)
-  // small MOUSE MUZZLE + button nose: the head was a smooth ball whose only
-  // cues were the cheek discs and the tail
-  + snout(60, 69, 9.5, 5.5, c.color, c.belly)
-  + pf('M60 64.5 l-3.6 -3.6 h7.2 Z', OUT) + smile(60, 68, 7);
+  // Pikachu has NO projecting muzzle, so it gets none: the old build printed a
+  // closed snout patch on the cheekless middle of the face, which is exactly
+  // the "muzzle printed on a ball" artifact. Button nose + wide W mouth only.
+  + pf('M60 64.5 l-3.6 -3.6 h7.2 Z', OUT)
+  + ln('M60 66 v2.6 M60 68.6 q-5 4.4 -9 0.6 M60 68.6 q5 4.4 9 0.6', OUT, 2);
 
 /* -- MEWTWO --------------------------------------------------------------
  * Plan: tall and gaunt - oversized cranium, a tube running from the skull to
@@ -898,13 +1005,13 @@ POSE.mewtwo = (c) => ''
   + hornPair(60, 16, 23, 13, 5, c.color, c.accent)
   // big cranium: the lower half draws IN to a narrow muzzle root instead of
   // closing as a circle, so the snout below breaks the outline
-  + p('M60 2 C80 2 90 18 90 34 C90 45 84 52 74 55'
-    + ' C69 56.5 51 56.5 46 55 C36 52 30 45 30 34 C30 18 40 2 60 2 Z', c.color)
+  + keyholeHead({
+    crown: 2, cy: 30, cw: 29.5, py: 47, pinch: 14, my: 55, mw: 18.5, mb: 64,
+    c: c.color, under: c.belly, lip: 0.46,
+  })
   + p('M60 -6 q11 2 9 12 q-9 5 -18 0 q-2 -10 9 -12 Z', c.color)
-  // FELINE MUZZLE + heavy chin: the psychic cat has a short blunt snout, and
-  // without it this head was a white balloon identifiable only by its tail.
-  + snout(60, 56, 12, 9, c.color, c.belly)
-  + ln('M60 54.6 v3.2 M60 57.8 q-4.4 3.8 -8 0.4 M60 57.8 q4.4 3.8 8 0.4', OUT, 1.9)
+  // the W lip, drawn ON the muzzle mass
+  + ln('M60 54.5 v3.4 M60 57.9 q-4.6 4 -8.4 0.4 M60 57.9 q4.6 4 8.4 0.4', OUT, 1.9)
   + browRidge(60, 26, 12.5, 8, 4.4, c.color)
   + gloss(46, 14, 12, 8)
   + ef(46, 32, 5.6, 6.4, '#b58cff') + ef(74, 32, 5.6, 6.4, '#b58cff')
@@ -924,14 +1031,18 @@ POSE.garchomp = (c) => ''
   + p('M42 62 C22 54 6 68 12 84 C24 76 34 76 44 82 Z', c.color)
   + p('M78 62 C98 54 114 68 108 84 C96 76 86 76 76 82 Z', c.color)
   + ln('M16 78 L38 68 M110 78 L88 68', '#cfe0f5', 2.2)
-  // flat shark head with a wide jaw + swept head fins
-  + p('M32 34 C32 18 44 10 60 10 C76 10 88 18 88 34 C88 48 76 58 60 58'
-    + ' C44 58 32 48 32 34 Z', c.color)
+  // HEAD: one keyhole contour - flat shark cranium, cheeks stepping IN, then
+  // the SNOUT flaring back out past that pinch to a blunt jaw at y=60. Round 4:
+  // the jaw used to be a white band painted across the bottom of a closed dome.
+  + keyholeHead({
+    crown: 10, cy: 25, cw: 28, py: 37, pinch: 15.5, my: 46, mw: 20.5, mb: 60,
+    c: c.color, under: '#f6f2ea', lip: 0.1,
+  })
   + p('M34 26 C10 16 2 26 4 38 C20 38 28 34 38 32 Z', c.color)
   + p('M86 26 C110 16 118 26 116 38 C100 38 92 34 82 32 Z', c.color)
   + pf('M46 18 q14 -7 28 0 q-14 -3 -28 0 Z', c.accent)
-  + p('M34 40 C46 52 74 52 86 40 C84 52 74 58 60 58 C46 58 36 52 34 40 Z', '#f6f2ea', OUT, 2.2)
-  + teeth(60, 44, 20, 6)
+  + ln('M42.5 44.6 C48 51.5 72 51.5 77.5 44.6', OUT, 2.4)
+  + teeth(60, 47, 15, 6)
   + ef(46, 32, 5.6, 4.2, '#ffd63b') + ef(74, 32, 5.6, 4.2, '#ffd63b')
   + ef(46, 32, 2.5, 3.6, OUT) + ef(74, 32, 2.5, 3.6, OUT);
 
@@ -1108,6 +1219,23 @@ POSE.greninja = (c) => {
  *     mandible beak projects a clear 20 units BELOW that step, so it breaks
  *     the skull silhouette instead of being printed on it. Jaw-hinge bumps,
  *     a beak seam, a darker lower mandible and nostrils on the upper plane.
+ *
+ * Round 4, SILHOUETTE pass - the beak was a `keyholeHead` contour but a
+ * brightness(0) test still showed a bare spiked slab: the CHEST reached up to
+ * y=36 while the beak ran from y=31 to y=60, so the entire beak was drawn
+ * INSIDE the torso's silhouette and contributed nothing to the outline. A
+ * keyhole head only reads if the space around the muzzle is background:
+ *   - The chest top dropped to a low dome peaking at y=53, and the head shrank
+ *     and rose (beak floor y=55), so the beak now hangs in OPEN AIR from the
+ *     cheek pinch down, with a concave notch either side of the join.
+ *   - A slim NECK column (half-width 5.6, far narrower than the beak's 18)
+ *     drawn under both chest and head carries the head without re-thickening
+ *     the outline where the beak works.
+ *   - The ARMS were re-rooted low and steep. `limb` buries its shoulder cone
+ *     anti-parallel to the arm, so the old high, wide-flung roots fired that
+ *     cone straight up into the newly-opened neck space as a red spike.
+ *   - The cream ruff moved off the jaw onto the shoulders: rooted under the
+ *     jowls it filled exactly the background the beak needs.
  *   - A FEATHER LANGUAGE (`plume`) used in three places, so the species read
  *     is spread across the whole figure: the tall THREE-PLUME head crest
  *     (centre plume tallest, side pair swept back), the cream NECK RUFF
@@ -1119,8 +1247,10 @@ POSE.greninja = (c) => {
  *   - Bird TALONS on cream shanks below the tufts (`digiLegs`).
  */
 POSE.blaziken = (c) => {
-  const beak = '#f7d27a';               // warm horn gold: the beak's own value
-  const lower = '#dcb45c';              // darker lower mandible
+  // saturated horn gold, deliberately several steps off the cream neck ruff it
+  // sits in front of - a pale beak merged with the ruff into one blond mask.
+  const beak = '#e6a327';
+  const lower = '#b57a15';              // darker lower mandible
   /* one feather: a tapered lens from a buried root to a fine tip. */
   const plume = (x, y, tx, ty, w, fill, inner) => {
     const q = (v) => Math.round(v * 100) / 100;
@@ -1147,37 +1277,59 @@ POSE.blaziken = (c) => {
     + [-1, 1].map((s) => plume(60 + 13 * s, 66, 60 + 32 * s, 96, 7.6, c.color, c.accent)
       + plume(60 + 16 * s, 68, 60 + 25 * s, 110, 8.2, c.color, c.accent)
       + plume(60 + 8 * s, 70, 60 + 11 * s, 104, 6.8, c.color, c.accent)).join('')
-    // TORSO: broad chest, pinched waist
-    + p('M40 42 C34 55 33 70 38 82 C42 90 48 95 60 95 C72 95 78 90 82 82'
-      + ' C87 70 86 55 80 42 C70 36 50 36 40 42 Z', c.color)
-    // chest plate top kept LOW (y=58) so the gold beak above it reads against
-    // RED, not against a second field of cream
-    + pf('M48 64 C44 71 44 80 48 89 C53 92.5 67 92.5 72 89 C76 80 76 71 72 64'
-      + ' C66 60 54 60 48 64 Z', c.belly)
-    + ln('M60 66 v24', '#dcc79a', 2)
-    + ln('M50 76 C55 80 65 80 70 76 M51 85 C56 89 64 89 69 85', '#dcc79a', 1.6)
-    // ARMS: heavy upper arm -> real elbow -> forearm -> ATTACHED clawed hand
-    + limb(41, 48, 21, 68, 12.5, c.color)
-    + limb(22, 67, 14, 92, 11.5, c.color, 9.2, claw3, 0.9)
-    + limb(79, 48, 99, 68, 12.5, c.color)
-    + limb(98, 67, 106, 92, 11.5, c.color, 9.2, claw3, 0.9)
+    // TORSO: broad chest, pinched waist. Round 4 (silhouette pass): the top
+    // edge is no longer a dome across the whole width - it now has a SHOULDER
+    // CREST over each deltoid (y~42) and dives to a deep NECK NOTCH at the
+    // centre line (y=57). The beak's floor stops at y=49, so the whole beak
+    // hangs in open background instead of being swallowed by the chest, which
+    // is what made the head+shoulders read as one spiked slab.
+    // NECK: a slim column from the jaw hinge onto the chest, drawn UNDER both
+    // the chest (which swallows its lower keyline) and the head (whose beak
+    // sits in FRONT of it). It is deliberately narrower than the beak's flare
+    // (half-width 5.6 vs 18), so it carries the head without ever widening the
+    // silhouette where the beak is doing the talking: the beak still owns the
+    // outline all the way from the cheek pinch to its floor.
+    + p('M54.4 34 C53 42 53 52 54.4 62 L65.6 62 C67 52 67 42 65.6 34 Z', c.color)
+    + p('M36 60 C32 70 32 81 37 89 C43 94.5 77 94.5 83 89 C88 81 88 70 84 60'
+      + ' C77 55 70 53 60 53 C50 53 43 55 36 60 Z', c.color)
+    // chest plate: dropped with the chest so a band of RED survives between the
+    // cream plate and the neck notch (the gold beak must never sit on cream)
+    + pf('M48 68 C44 74 44 82 48 90 C53 93 67 93 72 90 C76 82 76 74 72 68'
+      + ' C66 64 54 64 48 68 Z', c.belly)
+    + ln('M60 69 v21', '#dcc79a', 2)
+    + ln('M50 79 C55 83 65 83 70 79 M51 87 C56 91 64 91 69 87', '#dcc79a', 1.6)
+    // ARMS: heavy upper arm -> real elbow -> forearm -> ATTACHED clawed hand.
+    // Rooted LOW on the ribs and hanging near-vertically: `limb` buries its
+    // shoulder cone anti-parallel to the arm, so a high, wide-flung root threw
+    // that cone up into the neck notch as a red spike. Steep arms bury it
+    // inside the ribs instead.
+    + limb(37, 69, 21, 86, 12.5, c.color, 0, null, 0.95)
+    + limb(83, 69, 99, 86, 12.5, c.color, 0, null, 0.95)
+    + limb(21, 85, 13, 104, 11.5, c.color, 9.2, claw3, 0.95)
+    + limb(99, 85, 107, 104, 11.5, c.color, 9.2, claw3, 0.95)
     // elbow fill, so the two segments read as one jointed arm (UNSTROKED: a
     // keylined circle here reads as a robot ball-joint)
-    + ef(21.5, 67.5, 7.2, 6.6, c.color)
-    + ef(98.5, 67.5, 7.2, 6.6, c.color)
+    + ef(21, 85.5, 7.2, 6.6, c.color)
+    + ef(99, 85.5, 7.2, 6.6, c.color)
     // WRIST FLAMES: short licks rooted ON the wrist, just outboard of the hand
     + [-1, 1].map((s) => {
-      const x = 60 + 48 * s;
-      return hot(`M${x - 3 * s} 88 C${x - 10 * s} 79 ${x - 7 * s} 67 ${x + 3 * s} 58`
-        + ` C${x + 1 * s} 68 ${x + 8 * s} 69 ${x + 8 * s} 63`
-        + ` C${x + 13 * s} 74 ${x + 9 * s} 85 ${x + 3 * s} 91 Z`, '#ff8e2b')
-        + hot(`M${x - 1 * s} 87 C${x - 5 * s} 79 ${x - 3 * s} 69 ${x + 4 * s} 62`
-          + ` C${x + 4 * s} 70 ${x + 8 * s} 71 ${x + 7 * s} 67`
-          + ` C${x + 11 * s} 76 ${x + 7 * s} 84 ${x + 4 * s} 88 Z`, '#ffd63b');
+      const x = 60 + 47 * s;
+      return hot(`M${x - 3 * s} 101 C${x - 10 * s} 92 ${x - 7 * s} 80 ${x + 3 * s} 71`
+        + ` C${x + 1 * s} 81 ${x + 8 * s} 82 ${x + 8 * s} 76`
+        + ` C${x + 13 * s} 87 ${x + 9 * s} 98 ${x + 3 * s} 104 Z`, '#ff8e2b')
+        + hot(`M${x - 1 * s} 100 C${x - 5 * s} 92 ${x - 3 * s} 82 ${x + 4 * s} 75`
+          + ` C${x + 4 * s} 83 ${x + 8 * s} 84 ${x + 7 * s} 80`
+          + ` C${x + 11 * s} 89 ${x + 7 * s} 97 ${x + 4 * s} 101 Z`, '#ffd63b');
     }).join('')
-    // NECK RUFF: cream feathers fanning out from under the jaw
-    + [[-15, -29], [-9, -20], [9, 20], [15, 29]]
-      .map(([rx, tx]) => plume(60 + rx, 35, 60 + tx, 53, 5.6, c.belly, '#e0cba2')).join('')
+    // NECK RUFF: this is what CARRIES THE HEAD. The ruff feathers root under
+    // the jowls (hidden behind the head, drawn last) and sweep DOWN and OUT
+    // onto the shoulder crests, so the head is joined to the body along the
+    // SIDES only. The centre line between the beak's floor and the neck notch
+    // stays open background - which is the whole point: the beak reads as a
+    // lobe hanging past the skull, flanked by two concave notches.
+    + [-1, 1].map((s) => ''
+      + plume(60 + 16 * s, 63, 60 + 33 * s, 55, 5.6, c.belly, '#e0cba2')
+      + plume(60 + 12 * s, 66, 60 + 26 * s, 60, 5, c.belly, '#e0cba2')).join('')
     // HEAD CREST: three TALL slim plumes, centre tallest, side pair swept back
     // (tips stop at y=-7: the render box bleeds only 8 units above the rig)
     // (swept OUT more than up, so the outer pair cannot read as a pair of ears)
@@ -1186,29 +1338,26 @@ POSE.blaziken = (c) => {
     + plume(54, 9, 41, -6, 3.6, c.color, c.accent)
     + plume(66, 9, 79, -6, 3.6, c.color, c.accent)
     + plume(60, 12, 60, -7.5, 6, c.color, c.accent)
-    // SKULL: dome whose lower silhouette pulls IN at the cheeks and stops well
-    // above the chin, so the beak below breaks the outline
-    + p('M36 24 C36 9 47 1 60 1 C73 1 84 9 84 24'
-      + ' C84 31 80 36 73 37.6 C67 39 53 39 47 37.6'
-      + ' C40 36 36 31 36 24 Z', c.color)
-    // BEAK: a pointed two-mandible wedge projecting a clear 19 units past that
-    // step, in a warm horn gold so it never merges with the cream chest plate
-    + p('M44 33.5 C43.5 44 50.5 53.5 60 57.5 C69.5 53.5 76.5 44 76 33.5'
-      + ' C68 39 52 39 44 33.5 Z', beak)
-    + pf('M46.4 42.6 C48.6 49.4 54 55.4 60 57.5 C66 55.4 71.4 49.4 73.6 42.6'
-      + ' C68.6 46.6 51.4 46.6 46.4 42.6 Z', lower)
-    + ln('M45.6 41.6 C50.5 47.8 69.5 47.8 74.4 41.6', OUT, 2.4)
+    // HEAD: ONE keyhole contour - cranium dome, cheeks stepping IN to a narrow
+    // beak root, then the BEAK flaring back OUT past that pinch (gape corners
+    // wider than the cheeks) before tapering to a point at y=58. Round 4: the
+    // beak used to be a separate wedge whose corners sat exactly on the skull's
+    // edge, so it read as a gold band printed across the lower face.
+    + keyholeHead({
+      crown: -2, cy: 20, cw: 27, py: 30, pinch: 12, my: 37.5, mw: 18, mb: 55,
+      floor: 'wedge', c: c.color, muzzle: beak, under: lower, lip: 0.26,
+    })
+    // mandible seam ON the beak, following its taper
+    + ln('M49.5 42 C54 49 66 49 70.5 42', OUT, 2.2)
     // centre ridge down the upper mandible
-    + ln('M60 36.5 v5', '#dcb45c', 1.5)
-    + ef(55.6, 38.2, 1.8, 1.4, OUT) + ef(64.4, 38.2, 1.8, 1.4, OUT)
-    // jaw-hinge bumps: the beak is socketed into the skull, not glued on
-    + ef(44.5, 35, 4.6, 3.4, c.color) + ef(75.5, 35, 4.6, 3.4, c.color)
+    + ln('M60 32 v4.5', '#c98d23', 1.5)
+    + ef(56, 36, 1.8, 1.4, OUT) + ef(64, 36, 1.8, 1.4, OUT)
     // BROW SHELF over the eyes, so they sit under bone
-    + browRidge(60, 19, 11, 7.6, 3.6, c.color)
-    + gloss(47, 11, 10.5, 5.6)
-    + ef(49.5, 25.5, 5.4, 6, '#fff6d8') + ef(70.5, 25.5, 5.4, 6, '#fff6d8')
-    + ef(50.1, 26.5, 2.5, 3.6, OUT) + ef(71.1, 26.5, 2.5, 3.6, OUT)
-    + ef(47.4, 23, 1.7, 1.7, '#ffffff') + ef(68.4, 23, 1.7, 1.7, '#ffffff');
+    + browRidge(60, 18, 12, 8, 3.8, c.color)
+    + gloss(46, 10, 11.5, 6)
+    + ef(50, 25, 5.5, 6.1, '#fff6d8') + ef(70, 25, 5.5, 6.1, '#fff6d8')
+    + ef(50.7, 26.1, 2.6, 3.7, OUT) + ef(70.7, 26.1, 2.6, 3.7, OUT)
+    + ef(47.9, 22.4, 1.8, 1.8, '#ffffff') + ef(67.9, 22.4, 1.8, 1.8, '#ffffff');
 };
 
 /* -- MEOWTH : slim cream cat, koban coin, whiskers, curled tail ---------- */
@@ -1223,11 +1372,12 @@ POSE.meowth = (c) => ''
   // SKULL: a wide cat cranium whose cheeks pull in to a muzzle root, so the
   // snout below breaks the outline (the old head was a cream ball whose only
   // species cue was the coin bolted to its forehead)
-  + p('M60 26 C80 26 92 40 92 56 C92 66 86 73 76 76'
-    + ' C70 77.5 50 77.5 44 76 C34 73 28 66 28 56 C28 40 40 26 60 26 Z', '#f6ead0')
-  // MUZZLE: a broad cat snout with whisker pads, a pale chin and the W lip
-  + snout(60, 77, 14, 10, '#f6ead0', '#efe0be')
-  + ef(49.5, 74.5, 5, 4, '#f6ead0') + ef(70.5, 74.5, 5, 4, '#f6ead0')
+  + keyholeHead({
+    crown: 26, cy: 52, cw: 32, py: 70, pinch: 16, my: 79, mw: 21, mb: 89,
+    c: '#f6ead0', under: '#efe0be', lip: 0.44,
+  })
+  // whisker pads bulging either side of the muzzle root
+  + ef(48, 74, 5.6, 4.4, '#f6ead0') + ef(72, 74, 5.6, 4.4, '#f6ead0')
   + gloss(46, 40, 12, 7)
   + e(60, 32, 10, 7.5, '#ffd63b', '#b07d18', 2.4)
   + ln('M54 32 h12', '#b07d18', 2)
@@ -1372,7 +1522,8 @@ POSE.celebi = (c) => ''
     + ' C72 63.5 68 66 60 66 C52 66 48 63.5 42 61 C34 58 30 52 30 44'
     + ' C30 32 42 20 60 20 Z', c.color)
   + p('M31 40 L16 34 L32 50 Z', c.color) + p('M89 40 L104 34 L88 50 Z', c.color)
-  + snout(60, 59, 8.5, 5.5, c.color, '#dff3c8')
+  // (Celebi has no muzzle: the old printed snout patch is gone, and the chin
+  //  mass now comes from the skull path's own tapered lower half.)
   + browRidge(60, 36, 11, 7.5, 4, c.color)
   + gloss(48, 29, 11, 7)
   + ef(49, 46, 5.6, 6.2, '#2a3a6a') + ef(71, 46, 5.6, 6.2, '#2a3a6a')
@@ -1409,14 +1560,14 @@ POSE.squirtle = (c) => ''
     ln(`M${x} ${y - 7.5} l7.5 4.7 v8.4 l-7.5 4.7 l-7.5 -4.7 v-8.4 Z`, '#a86a20', 2.4)).join('')
   + limb(32, 72, 16, 92, 11, c.color, 7, webHand, 0.35)
   + limb(88, 72, 104, 92, 11, c.color, 7, webHand, 0.35)
-  // SKULL: dome + cheeks pulling in to a beak root
-  + p('M32 34 C32 16 45 7 60 7 C75 7 88 16 88 34'
-    + ' C88 44 83 51 73 54 C68 55.5 52 55.5 47 54 C37 51 32 44 32 34 Z', c.color)
-  // BEAK: a short rounded upper lip projecting past the skull line, with a
-  // pale under-jaw and a hard seam where the two halves meet.
-  + snout(60, 56, 12.5, 10, c.color, c.belly)
-  + ln('M48.5 57.5 C53 62.5 67 62.5 71.5 57.5', OUT, 2.4)
-  + ln('M57 52.4 q1 1.3 1.9 0 M61.1 52.4 q1 1.3 1.9 0', OUT, 1.3)
+  // HEAD: one keyhole contour - dome, cheeks stepping in, then the short
+  // rounded turtle BEAK swelling back out past the pinch and closing at y=68
+  + keyholeHead({
+    crown: 7, cy: 31, cw: 28, py: 48, pinch: 14.5, my: 57, mw: 19, mb: 68,
+    c: c.color, under: c.belly, lip: 0.46,
+  })
+  + ln('M50 58.6 C54 63.6 66 63.6 70 58.6', OUT, 2.4)
+  + ln('M57 53 q1 1.3 1.9 0 M61.1 53 q1 1.3 1.9 0', OUT, 1.3)
   + browRidge(60, 26, 12.5, 8, 4.4, c.color)
   + gloss(47, 19, 12, 7)
   + ef(48, 34, 6.6, 7.6, '#ffffff') + ef(72, 34, 6.6, 7.6, '#ffffff')
@@ -1464,39 +1615,26 @@ POSE.charmander = (c) => ''
   // mass reads instead of the taper.
   + limb(41, 82, 25, 96, 14.5, c.color, 9.6, claw3, 0.34)
   + limb(79, 82, 95, 96, 14.5, c.color, 9.6, claw3, 0.34)
-  // SKULL: a domed cranium whose lower silhouette PULLS IN at the cheeks and
-  // stops well above the chin, so the muzzle mass below it breaks the outline
-  // instead of being printed on a ball.
-  + p('M30 33 C30 14 43 4 60 4 C77 4 90 14 90 33'
-    + ' C90 43 85 49 76 51'          // right cheek falls back and in
-    + ' C70 52.5 50 52.5 44 51'      // narrow muzzle root (well inside the
-    //                                  muzzle's own width, so its top arc
-    //                                  crosses the face as a real break line)
-    + ' C35 49 30 43 30 33 Z', c.color)
-  // MUZZLE: a rounded reptile snout PROJECTING below AND wider than the skull's
-  // muzzle root. Its top arc is the break line that puts the snout in front of
-  // the face plane; the cream underside is the lower jaw.
-  // (round-3 audit: the muzzle was a WIDE FLAT band that read as a duck bill.
-  // It is now narrower than the cheeks and DEEPER, so it protrudes as a
-  // rounded reptile snout, with a second smaller nose-bridge mass stacked on
-  // its upper plane to give the profile a real step.)
-  + snout(60, 57, 12.6, 14, c.color, c.belly)
-  + ef(60, 49.5, 9.4, 5.2, c.color)
-  // jaw-hinge bumps either side of the muzzle root: the mandible corners
-  + ef(46.5, 50.5, 5, 3.8, c.color) + ef(73.5, 50.5, 5, 3.8, c.color)
-  // nostrils on the muzzle's top plane, forward-facing
-  + ef(56, 49.6, 1.7, 1.3, OUT) + ef(64, 49.6, 1.7, 1.3, OUT)
-  // mouth: a wide lizard lip with two small upper fangs over it, and a chin
-  // crease under it so the mandible has a front plane
-  + grin(60, 60, 8.4)
-  + teeth(60, 60.6, 5.4, 2)
-  + ln('M53.5 68 C56.5 70.4 63.5 70.4 66.5 68', '#dcbf90', 1.6)
+  // HEAD: ONE keyhole contour - domed cranium, cheeks stepping IN to a narrow
+  // muzzle root, then the snout swelling back OUT past that pinch. Round 4: the
+  // old build stacked a separate snout() mass over a closed skull ball, so the
+  // silhouette never broke and the only thing that read was the seam plus a
+  // pale bib. Now the outline itself has the snout on it.
+  + keyholeHead({
+    crown: 3, cy: 25, cw: 28.5, py: 44, pinch: 18, my: 54, mw: 23.2, mb: 68,
+    c: c.color,
+  })
+  // nostrils high on the snout's front plane
+  + ef(55.4, 50.5, 1.9, 1.5, OUT) + ef(64.6, 50.5, 1.9, 1.5, OUT)
+  // mouth ON the snout (well above its floor), with two small upper fangs
+  + grin(60, 58.5, 10.4)
+  + teeth(60, 59, 6.6, 2)
   // BROW SHELF over the eyes + frown seam, so the eyes sit under bone
-  + browRidge(60, 27, 12, 8, 4, c.color)
-  + gloss(46, 17, 12, 6.5)
-  + ef(48, 33.5, 6, 6.8, '#ffffff') + ef(72, 33.5, 6, 6.8, '#ffffff')
-  + ef(48.8, 34.5, 3, 3.9, OUT) + ef(72.8, 34.5, 3, 3.9, OUT)
-  + ef(46.4, 31, 1.7, 1.7, '#ffffff') + ef(70.4, 31, 1.7, 1.7, '#ffffff');
+  + browRidge(60, 24, 12, 8, 4, c.color)
+  + gloss(46, 14, 12, 6.5)
+  + ef(48.5, 30.5, 6, 6.8, '#ffffff') + ef(71.5, 30.5, 6, 6.8, '#ffffff')
+  + ef(49.3, 31.5, 3, 3.9, OUT) + ef(72.3, 31.5, 3, 3.9, OUT)
+  + ef(46.9, 28, 1.7, 1.7, '#ffffff') + ef(69.9, 28, 1.7, 1.7, '#ffffff');
 
 /* -- BULBASAUR : squat three-quarter quadruped, the BULB is the tallest thing
  * Round 9 audit - "the worst figure on the podium: a mint ball head with a
@@ -1583,13 +1721,18 @@ POSE.bulbasaur = (c) => {
     + ef(23, 76.4, 1.7, 1.7, '#ffffff') + ef(45.5, 77.4, 1.7, 1.7, '#ffffff');
 };
 
-/* -- DITTO : no limbs, no face structure - a slumped puddle --------------- */
+/* -- DITTO : no limbs, no face structure - a slumped puddle ---------------
+ * Round 4: the two swept spurs off the shoulders read as HORNS, which the
+ * reference blob does not have. They are gone; the mass is now one wobbling
+ * puddle whose only silhouette event is a low bulge slumping out over the
+ * plinth on each side.
+ */
 POSE.ditto = (c) => ''
-  + p('M60 40 C92 40 110 66 108 94 C106 118 84 126 60 126 C36 126 14 118 12 94'
-    + ' C10 66 28 40 60 40 Z', c.color)
-  + p('M18 72 C6 58 12 46 18 42 C20 56 22 64 26 68 Z', c.color)
-  + p('M102 72 C114 58 108 46 102 42 C100 56 98 64 94 68 Z', c.color)
-  + gloss(40 , 60, 17, 10)
+  + p('M60 43 C85 43 101 57 105 77'
+    + ' C109 95 113 108 108 116 C103 123 86 126 60 126'      // right slump
+    + ' C34 126 17 123 12 116 C7 108 11 95 15 77'            // left slump
+    + ' C19 57 35 43 60 43 Z', c.color)
+  + gloss(40, 60, 17, 10)
   + ef(44, 78, 4.6, 4.6, OUT) + ef(76, 78, 4.6, 4.6, OUT)
   + ln('M48 98 h24', OUT, 3.6)
   + ef(60, 114, 28, 8, '#ffffff', 0.14);

@@ -14,7 +14,9 @@
  * than the ribbon itself - so arc-spaced chips still collided across a hairpin
  * and piled up two-deep. These loops keep every distant pair of strands >=23
  * units apart (checked numerically; see `minStrandGap`), i.e. wider than the
- * ribbon plus a chip, so single-file spacing along the arc is enough.
+ * ribbon plus a chip, so single-file spacing along the arc is enough. That has
+ * extra headroom now that the ribbon is a hairline (casing 6.7u + chip 4.5u =
+ * ~11u of the 23), so these shapes stay valid - do not narrow the folds.
  */
 
 /* Wandering circuits in a 0..100 x 0..100 box; index 0 (the start line) sits on

@@ -40,12 +40,18 @@ const H = (a, b, t) => hexish(mix(a, b, t));
 // ring = [z, half width, deck y (centreline), floor y]
 // The waist swells into a hip over each axle so the tyres are faired into the
 // bodywork instead of bolted onto a slab-sided tub.
+//
+// The front half is a real wedge, not a slab with a chamfer: from the dash
+// bulkhead forward every ring loses width AND deck height, so the nose is a
+// low rounded snout about a quarter of the cockpit width (the reference kart's
+// bonnet drops away between the front tyres instead of running on at cockpit
+// height to a blunt end).
 const RING = [
-  [1.42, 0.28, 0.58, 0.42],
-  [1.24, 0.48, 0.65, 0.35],
-  [1.06, 0.615, 0.71, 0.31],
-  [0.86, 0.700, 0.77, 0.29],
-  [0.62, 0.720, 0.83, 0.275],
+  [1.50, 0.148, 0.428, 0.362],
+  [1.36, 0.296, 0.474, 0.325],
+  [1.16, 0.434, 0.550, 0.298],
+  [0.92, 0.556, 0.642, 0.282],
+  [0.62, 0.655, 0.756, 0.275],
   [0.30, 0.745, 0.875, 0.27],
   [0.04, 0.775, 0.90, 0.265],
   [-0.22, 0.790, 0.92, 0.265],
@@ -263,32 +269,58 @@ function cockpitFaces(out, dark, seat, trim, shelf) {
 }
 
 /**
- * Rear bumper: a lofted band whose plan follows the boat tail and whose top and
- * bottom edges tuck in, so it wraps the hull instead of crossing it as a plank.
- * Only its centre panel is flat, and that is where the lights and plate live.
+ * Rear valance: NOT a bumper bolted to the tail. Its leading rings sit *inside*
+ * the hull, tucked behind the sill band, and it only becomes visible as the boat
+ * tail narrows above it - so the skirt appears to run unbroken from the sill,
+ * between the wheels, and around the back. It is painted in the same single
+ * skirt colour as the hull's sill/low bands, so there is no second-blue seam:
+ * the only thing separating valance from flank is the lambert shading of its own
+ * curvature. The lights and plate live on its flat centre panel.
  */
-const BUMP = [[-1.05, 0.625], [-1.17, 0.620], [-1.26, 0.595], [-1.305, 0.545], [-1.325, 0.44]];
+// [z, half width, top edge y]. The top edge is a ramp, not a constant height:
+// its leading values ARE the hull's own low-band top (ring bot + 0.4h) at that z,
+// so where the valance emerges from under the flank the two skirt lines meet
+// flush. A constant height instead steps up into a band and leaves a
+// body-coloured tongue dipping into the skirt at the crossover.
+const BUMP = [
+  [-0.86, 0.626, 0.573], [-0.94, 0.652, 0.586], [-1.02, 0.670, 0.602],
+  [-1.16, 0.652, 0.652], [-1.26, 0.600, 0.698], [-1.330, 0.500, 0.720],
+  [-1.365, 0.330, 0.704],
+];
+const VAL_Y0 = 0.285;      // valance floor
+const VAL_T = [0, 0.30, 0.64, 0.87, 1];
+const VAL_K = [0.92, 1.00, 1.00, 0.95, 0.80];
 
-function rearFaces(out, trim, dark) {
-  const rings = [
-    planRing(0.30, BUMP, 0.90),
-    planRing(0.40, BUMP, 1.00),
-    planRing(0.575, BUMP, 1.00),
-    planRing(0.665, BUMP, 0.90),
-  ];
-  const lo = H(dark, '#000000', 0.16);
-  loft(out, rings, () => dark, 0.06);
-  out.push({ col: H(dark, '#ffffff', 0.16), lift: 0.07, pts: rings[3].slice().reverse() });
-  out.push({ col: lo, lift: 0.07, pts: rings[0] });
+/** One valance ring at height parameter t, wound like planRing(). */
+function valRing(t, k) {
+  const y = (s) => VAL_Y0 + t * (s[2] - VAL_Y0);
+  const pts = [];
+  for (let i = BUMP.length - 1; i >= 0; i--) pts.push([BUMP[i][1] * k, y(BUMP[i]), BUMP[i][0]]);
+  for (const s of BUMP) pts.push([-s[1] * k, y(s), s[0]]);
+  return pts;
+}
+
+function rearFaces(out, trim, skirt) {
+  // Tall enough at the back that the hull's boat-tail cap is tucked inside it
+  // (left exposed it reads as a body-coloured lump stuck on the tail), with the
+  // top ring pulled well inboard so its leading end stays hidden under the sill.
+  const rings = VAL_T.map((t, i) => valRing(t, VAL_K[i]));
+  // Small depth bias only. The leading rings deliberately sit inside the hull, so
+  // a big bias would let those hidden faces sort in front of the flank and punch
+  // a blue patch through the bodywork; the lens/plate pads carry their own much
+  // larger lift, so they still win over the panel they are mounted on.
+  loft(out, rings, () => skirt, 0.02);
+  out.push({ col: skirt, lift: 0.03, pts: rings[rings.length - 1].slice().reverse() });
+  out.push({ col: skirt, lift: 0.03, pts: rings[0] });
   for (const sx of [-1, 1]) {
-    // lens pads, standing proud of the bumper's flat centre panel
-    box(out, sx * 0.20, sx * 0.42, 0.395, 0.565, -1.325, -1.348,
+    // lens pads, standing proud of the valance's flat centre panel
+    box(out, sx * 0.19, sx * 0.40, 0.385, 0.545, -1.330, -1.352,
       { top: '#f0666c', back: '#e8323a', front: '#e8323a', side: '#c02a32', lift: 0.40 });
   }
-  box(out, -0.155, 0.155, 0.385, 0.555, -1.325, -1.344,
+  box(out, -0.150, 0.150, 0.380, 0.540, -1.330, -1.348,
     { top: '#f2f5f8', back: '#f2f5f8', front: '#f2f5f8', side: '#c9ced6', lift: 0.40 });
   out.push({ col: trim, lift: 0.46,
-    pts: [[-0.105, 0.415, -1.347], [0.105, 0.415, -1.347], [0.105, 0.520, -1.347], [-0.105, 0.520, -1.347]] });
+    pts: [[-0.102, 0.408, -1.351], [0.102, 0.408, -1.351], [0.102, 0.512, -1.351], [-0.102, 0.512, -1.351]] });
 }
 
 /**
@@ -370,14 +402,26 @@ export function wheelFaces(out, cx, cz, r, hw, steer, spin, rim, lod = 1) {
         const a0 = A(i); const a1 = A(i + 1);
         out.push({
           col: WALL, flat: 0.5, two: true, lift: 0.01,
-          pts: [P(a0, side, 0.945), P(a0, side, 0.645), P(a1, side, 0.645), P(a1, side, 0.945)],
+          pts: [P(a0, side, 0.945), P(a0, side, 0.470), P(a1, side, 0.470), P(a1, side, 0.945)],
         });
       }
+    } else {
+      // Low detail skips the annulus, so close the whole sidewall with one dark
+      // disc - otherwise the smaller rim leaves a ring of open tyre that the
+      // background shines through on the distant karts.
+      const flat = [];
+      for (let i = 0; i < WN; i++) flat.push(P(A(i), side, 0.945));
+      out.push({ col: WALL, flat: 0.5, two: true, lift: 0.01, pts: flat });
     }
+    // Rim discs live exactly ON the tyre's shoulder plane (u = +-1) at less than
+    // half the tread radius, so the disc outline is strictly nested inside the
+    // sidewall circle from every angle. Pushing them outboard (u = 1.02 / 1.05)
+    // to "make sure they show" is what let a pale wedge poke out under the
+    // near-side tyres when the wheel went edge-on to the chase camera.
     const disc = []; const hub = [];
     for (let i = 0; i < WN; i++) {
-      disc.push(P(A(i), side * 1.02, 0.645));
-      hub.push(P(A(i), side * 1.05, 0.285));
+      disc.push(P(A(i), side, 0.470));
+      hub.push(P(A(i), side, 0.205));
     }
     // Near edge-on from a chase camera, so both must be two-sided or the rims
     // vanish and each tyre reads as a solid black block.
@@ -452,8 +496,13 @@ function rgbOf(hex) {
 // Track is set so each tyre's inboard sidewall sits ~0.03 outside the hip it
 // belongs to: no daylight between wheel and bodywork, and the rim disc still
 // clears the hull silhouette so both hubs read from a straight-on chase view.
+// Front axle sits further forward and on a narrower track than the rear: it
+// follows the tapered nose (a wide front track on a narrow snout reads as wheels
+// bolted to a plank) and the longer wheelbase keeps the near-side front and rear
+// tyres from projecting onto the same screen column mid-steer, where they used
+// to fuse into one dark barrel. The stub axles bridge the gap to the hull.
 export const AXLE = {
-  front: 0.96, rear: REAR_Z, xf: 0.735, xr: 0.822, rf: 0.268, rr: 0.298, hwf: 0.082, hwr: 0.092,
+  front: 1.045, rear: REAR_Z, xf: 0.690, xr: 0.826, rf: 0.258, rr: 0.300, hwf: 0.078, hwr: 0.094,
 };
 
 /**
@@ -464,10 +513,16 @@ export function buildKart({ body, trim, livery, steer = 0, spin = 0, lod = 1 }) 
   const base = hexish(body);
   const acc = hexish(livery || trim);
   const out = [];
+  // ONE skirt colour. The sill chamfer, the low flank band and the rear valance
+  // all wear the same paint, so the dark band reads as a single moulding running
+  // sill -> between the wheels -> around the tail, the way the reference kart's
+  // blue skirt does. Two shades of the accent here is what made the old rear end
+  // look like a separately bolted bumper box.
+  const skirt = H(acc, '#000000', 0.22);
   hullFaces(out, {
     pan: H(base, '#0b0d12', 0.66),
-    sill: H(acc, '#000000', 0.42),
-    low: acc,
+    sill: skirt,
+    low: skirt,
     side: base,
     deck: base,
     tail: H(base, '#000000', 0.10),
@@ -478,7 +533,7 @@ export function buildKart({ body, trim, livery, steer = 0, spin = 0, lod = 1 }) 
   // lump sitting on the deck instead of a seat sunk into the well).
   const seat = H(acc, '#16181e', 0.72);
   cockpitFaces(out, H(base, '#0b0d12', 0.70), seat, H(seat, '#000000', 0.10), H(base, '#000000', 0.16));
-  rearFaces(out, acc, H(acc, '#000000', 0.50));
+  rearFaces(out, acc, skirt);
   // The ducktail is body-coloured, a shade down. In the livery colour a pale
   // accent (Gengar's silver on purple) reads as a foreign white slab parked on
   // the deck; in the shell's own paint the lofted lip is defined by its own
