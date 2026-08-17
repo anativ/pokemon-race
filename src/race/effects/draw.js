@@ -150,123 +150,89 @@ function fnoise(n) {
   return x - Math.floor(x);
 }
 
-/**
- * Unit normal of the spine at index i (perpendicular to the local tangent).
- */
-function normalAt(sp, i) {
-  const a = sp[Math.max(0, i - 1)];
-  const b = sp[Math.min(sp.length - 1, i + 1)];
-  let dx = b.x - a.x;
-  let dy = b.y - a.y;
-  const m = Math.hypot(dx, dy) || 1;
-  dx /= m; dy /= m;
-  return { x: -dy, y: dx };
-}
-
-/**
- * One closed ribbon around the spine, `k` scaling the local half width. The
- * muzzle end is capped with a round arc so the jet does not read as a cut-off
- * rectangle, and the tip converges to a point.
- */
-function ribbonPath(c, sp, k) {
-  const n0 = normalAt(sp, 0);
-  c.beginPath();
-  const w0 = sp[0].w * k;
-  c.moveTo(sp[0].x + n0.x * w0, sp[0].y + n0.y * w0);
-  for (let i = 1; i < sp.length; i++) {
-    const n = normalAt(sp, i);
-    const w = sp[i].w * k;
-    c.lineTo(sp[i].x + n.x * w, sp[i].y + n.y * w);
-  }
-  for (let i = sp.length - 1; i >= 0; i--) {
-    const n = normalAt(sp, i);
-    const w = sp[i].w * k;
-    c.lineTo(sp[i].x - n.x * w, sp[i].y - n.y * w);
-  }
-  // rounded cap behind the muzzle
-  const tan = { x: n0.y, y: -n0.x };
-  c.quadraticCurveTo(
-    sp[0].x - n0.x * w0 - tan.x * w0 * 0.24, sp[0].y - n0.y * w0 - tan.y * w0 * 0.24,
-    sp[0].x - tan.x * w0 * 0.30, sp[0].y - tan.y * w0 * 0.30,
-  );
-  c.quadraticCurveTo(
-    sp[0].x + n0.x * w0 - tan.x * w0 * 0.24, sp[0].y + n0.y * w0 - tan.y * w0 * 0.24,
-    sp[0].x + n0.x * w0, sp[0].y + n0.y * w0,
-  );
-  c.closePath();
-}
-
 // The gradients run muzzle -> impact and stay LIT all the way to the far end:
 // this jet terminates on the kart it is burning, so it must not thin out into
 // nothing halfway down the road.
-const JET_SHELLS = [
-  { k: 1.85, blur: 26, comp: 'lighter', stops: [[0, 'rgba(255,90,20,.10)'], [0.30, 'rgba(255,112,26,.22)'], [0.78, 'rgba(255,150,46,.24)'], [1, 'rgba(255,170,60,.26)']] },
-  { k: 1.00, blur: 14, comp: 'source-over', stops: [[0, 'rgba(226,58,10,.34)'], [0.24, 'rgba(228,62,10,.70)'], [0.66, 'rgba(238,86,14,.72)'], [1, 'rgba(236,74,12,.66)']] },
-  { k: 0.74, blur: 10, comp: 'source-over', stops: [[0, 'rgba(255,124,22,.42)'], [0.26, 'rgba(255,134,28,.92)'], [0.70, 'rgba(255,158,38,.92)'], [1, 'rgba(255,148,32,.86)']] },
-  { k: 0.48, blur: 7, comp: 'source-over', stops: [[0, 'rgba(255,206,86,.46)'], [0.32, 'rgba(255,200,70,.96)'], [0.74, 'rgba(255,190,58,.92)'], [1, 'rgba(255,206,96,.90)']] },
-  { k: 0.24, blur: 5, comp: 'lighter', stops: [[0, 'rgba(255,255,246,.42)'], [0.34, 'rgba(255,250,222,.92)'], [0.70, 'rgba(255,232,160,.80)'], [1, 'rgba(255,240,190,.86)']] },
+const CONE_SHELLS = [
+  // 1. heat haze - the SAME silhouette, a hair proud of the body, additive
+  { k: 1.14, kt: 1.22, a: 0.38, blur: 18, comp: 'lighter',
+    stops: [[0, 'rgba(255,186,84,1)'], [0.55, 'rgba(255,116,28,1)'], [1, 'rgba(255,84,18,1)']] },
+  // 2. the BODY - fully opaque, deep orange, hottest at the mouth and burning
+  //    red where it lands on the victim
+  { k: 1.00, kt: 1.00, a: 1, blur: 5, comp: 'source-over',
+    stops: [[0, 'rgba(255,150,28,1)'], [0.42, 'rgba(246,102,14,1)'], [0.84, 'rgba(224,58,8,1)'], [1, 'rgba(255,126,26,1)']] },
+  // 3. inner flame, pulled back from the impact so the tip stays red
+  { k: 0.76, kt: 0.60, a: 1, blur: 4, comp: 'source-over',
+    stops: [[0, 'rgba(255,208,78,1)'], [0.5, 'rgba(255,166,40,1)'], [1, 'rgba(255,132,26,1)']] },
+  // 4. white-hot throat, only near the mouth
+  { k: 0.30, kt: 0.11, a: 1, blur: 3, comp: 'source-over',
+    stops: [[0, 'rgba(255,250,214,1)'], [0.5, 'rgba(255,226,132,1)'], [1, 'rgba(255,190,70,1)']] },
 ];
+
 
 /**
  * Hyper Beam: a short, dense, tapering flame plume - the Charizard fire-breath
  * jet of the reference item panel, seen from behind the kart.
  *
- * `sp` is the plume spine, running from the muzzle at the kart's nose forward
- * along the racing line; each entry is `{ x, y, w }` with `w` the local half
- * width in screen px. The body is painted as four nested ribbons filled with a
- * *continuous* linear gradient along the axis (deep red shell -> orange ->
- * gold -> white core), blurred where the browser supports it, so there are no
- * stamped circles anywhere in it.
+ * `cone` is the whole effect: `{ x0, y0, r0 }` the mouth on the firer's nose,
+ * `{ x1, y1, r1 }` the impact on the victim's chassis, plus `clock` for the
+ * boil. It is painted as four CONCENTRIC fills of one and the same silhouette
+ * (deep orange body -> gold -> white throat), each a single closed path with a
+ * continuous gradient along the axis. There is no muzzle flare, no mid-air
+ * segment and no impact ball: one shot is one shape, nose to victim.
  */
-export function flameJet(c, sp, t, opts = {}) {
-  if (!sp || sp.length < 2) return;
-  // snaps on almost instantly: pressing the item key has to read as a hit
-  const fade = t < 0.035 ? t / 0.035 : (t > 0.70 ? Math.max(0, (1 - t) / 0.30) : 1);
+export function flameCone(c, cone, t, opts = {}) {
+  if (!cone) return;
+  // Full strength on the FIRST frame - a fire-breath that ramps in over a few
+  // frames just reads as a translucent smear at the moment the player presses
+  // the button. It only fades at the end of the burn.
+  const fade = t > 0.76 ? Math.max(0, (1 - t) / 0.24) : 1;
   if (fade <= 0.01) return;
-  const pulse = 0.94 + Math.sin(t * 40) * 0.06;
-  const a = sp[0];
-  const z = sp[sp.length - 1];
+
+  // The cross-section of the plume is a squashed circle (wider than it is
+  // tall), so a cone aimed sideways across the frame still reads kart-TALL
+  // instead of standing up as a wall. Squashing the whole coordinate system
+  // turns both end caps into plain circles, which is what lets the silhouette
+  // below be built as ONE convex hull instead of a stack of sprites.
+  const flat = cone.flat || 0.62;
+  const x0 = cone.x0;
+  const y0 = cone.y0 / flat;
+  const x1 = cone.x1;
+  const y1 = cone.y1 / flat;
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  if (!(d > 2)) return;
+  const theta = Math.atan2(y1 - y0, x1 - x0);
+  const boil = 0.95 + Math.sin((cone.clock || 0) * 27) * 0.05;
   const canBlur = opts.blur !== false && typeof c.filter === 'string';
 
   c.save();
-  c.globalAlpha = fade;
-  for (const sh of JET_SHELLS) {
-    const g = c.createLinearGradient(a.x, a.y, z.x, z.y);
+  c.scale(1, flat);
+  for (const sh of CONE_SHELLS) {
+    const r0 = Math.max(2, cone.r0 * sh.k * boil);
+    // the hull is only defined while neither circle swallows the other
+    let r1 = Math.max(1.2, cone.r1 * sh.kt * boil);
+    if (r0 - r1 > d - 3) r1 = Math.max(1, r0 - d + 3);
+    const g = c.createLinearGradient(x0, y0, x1, y1);
     for (const [at, col] of sh.stops) g.addColorStop(at, col);
     c.globalCompositeOperation = sh.comp;
+    c.globalAlpha = fade * sh.a;
     c.fillStyle = g;
     if (canBlur) c.filter = `blur(${sh.blur}px)`;
-    ribbonPath(c, sp, sh.k * pulse);
+    // ONE closed path, and it is a quad: a FLAT near edge across the firer's
+    // nose, two straight tangents running down the taper, and a round far cap
+    // that wraps the kart being burnt. The near edge is deliberately flat - a
+    // round muzzle cap bulges BACK past the nose, and that backward lobe is
+    // what used to survive the rider cut-out as a separate blob of fire stuck
+    // on our own bumper.
+    const alpha = Math.acos(Math.max(-1, Math.min(1, (r0 - r1) / d)));
+    c.beginPath();
+    c.moveTo(x0 + r0 * Math.cos(theta - alpha), y0 + r0 * Math.sin(theta - alpha));
+    c.arc(x1, y1, r1, theta - alpha, theta + alpha);
+    c.lineTo(x0 + r0 * Math.cos(theta + alpha), y0 + r0 * Math.sin(theta + alpha));
+    c.closePath();
     c.fill();
   }
   if (canBlur) c.filter = 'none';
-
-  // muzzle bloom: a tight hot core at the nose, not a starburst
-  c.globalCompositeOperation = 'lighter';
-  const r0 = Math.max(4, a.w * 0.46);
-  const bloom = c.createRadialGradient(a.x, a.y, 0, a.x, a.y, r0);
-  bloom.addColorStop(0, 'rgba(255,255,248,.92)');
-  bloom.addColorStop(0.36, 'rgba(255,228,140,.58)');
-  bloom.addColorStop(1, 'rgba(255,132,30,0)');
-  c.globalAlpha = fade * 0.5;
-  c.fillStyle = bloom;
-  c.beginPath(); c.arc(a.x, a.y, r0, 0, TAU); c.fill();
-
-  // a few embers riding inside the plume (never outside its silhouette)
-  const seed = Math.floor(t * 40);
-  c.globalAlpha = fade * 0.8;
-  for (let i = 0; i < 9; i++) {
-    const f = (fnoise(i * 5 + 3) + t * 1.4) % 1;
-    const idx = Math.min(sp.length - 1, Math.floor(f * (sp.length - 1)));
-    const p = sp[idx];
-    const n = normalAt(sp, idx);
-    const off = (fnoise(i * 9 + seed) - 0.5) * p.w * 0.9;
-    const rr = Math.max(0.9, p.w * 0.10 * (1 - f * 0.6));
-    c.fillStyle = i % 3 ? 'rgba(255,224,140,.95)' : 'rgba(255,255,240,.95)';
-    c.beginPath();
-    c.arc(p.x + n.x * off, p.y + n.y * off, rr, 0, TAU);
-    c.fill();
-  }
   c.restore();
 }
 

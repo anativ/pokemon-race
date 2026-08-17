@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+import { serveRepo } from '../../../tools/screenshot.mjs';
+const OUT = process.argv[2];
+const ids = process.argv[3] === 'all' ? '' : (process.argv[3] || 'charizard,dragonite');
+const h = process.argv[4] || 300;
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: Number(process.argv[5]||1200), height: Number(process.argv[6]||460) }, deviceScaleFactor: 1.5 });
+const errs = []; p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+p.on('pageerror', (e) => errs.push(String(e)));
+await p.goto(`${origin}/src/assets/results/_devfigs.html?ids=${ids}&h=${h}`, { waitUntil: 'load' });
+await p.waitForTimeout(400);
+await p.screenshot({ path: OUT, clip: { x: 0, y: 0, width: Number(process.argv[5]||1200), height: Number(process.argv[6]||460) - 30 } });
+console.log('errors:', errs.length, errs.slice(0,3).join(' | '));
+await b.close(); await close();

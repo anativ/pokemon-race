@@ -31,201 +31,358 @@ export function hexish(col) {
 const H = (a, b, t) => hexish(mix(a, b, t));
 
 // ---- chassis loft -------------------------------------------------------
-// [z, top-of-deck y, half width]
-const SECT = [
-  [1.62, 0.54, 0.40],
-  [1.30, 0.68, 0.55],
-  [0.88, 0.82, 0.66],
-  [0.30, 0.90, 0.73],
-  [-0.36, 0.92, 0.74],
-  [-0.88, 0.86, 0.70],
-  [-1.12, 0.72, 0.60],
+// The body is ONE closed lofted shell: a stack of cross-section rings running
+// nose -> cockpit -> tail, joined by quad strips. Every visible panel is a wall
+// of that single solid, so there is nothing coplanar to z-fight, no floating
+// decal slabs and no seams between "deck", "flank" and "sill" pieces - the
+// silhouette reads as one rounded roadster hull from any steering angle.
+//
+// ring = [z, half width, deck y (centreline), floor y]
+// The waist swells into a hip over each axle so the tyres are faired into the
+// bodywork instead of bolted onto a slab-sided tub.
+const RING = [
+  [1.42, 0.28, 0.58, 0.42],
+  [1.24, 0.48, 0.65, 0.35],
+  [1.06, 0.615, 0.71, 0.31],
+  [0.86, 0.700, 0.77, 0.29],
+  [0.62, 0.720, 0.83, 0.275],
+  [0.30, 0.745, 0.875, 0.27],
+  [0.04, 0.775, 0.90, 0.265],
+  [-0.22, 0.790, 0.92, 0.265],
+  [-0.46, 0.798, 0.945, 0.265],
+  [-0.62, 0.792, 0.965, 0.27],
+  [-0.84, 0.762, 1.000, 0.285],
+  [-0.98, 0.700, 1.010, 0.320],
+  [-1.08, 0.605, 0.995, 0.360],
+  [-1.15, 0.490, 0.950, 0.415],
+  [-1.20, 0.342, 0.885, 0.490],
+  [-1.23, 0.170, 0.805, 0.570],
 ];
-const FLOOR = 0.26;
-const CROWN = 0.075;      // how much the deck domes across its width
-const LAT = [-1, -0.62, -0.24, 0.24, 0.62, 1];
+const CP_A = 5;            // first cockpit ring (dash bulkhead)
+const CP_B = 10;           // last cockpit ring (seat bulkhead)
+const RIM = 0.58;          // cockpit opening as a fraction of the ring half width
+const WELL = 0.50;         // seat floor height
+const FLOOR = 0.27;
 
-function deckY(sec, u) { return sec[1] - CROWN * u * u; }
+export const SEAT = {
+  x: RING[7][1] * RIM, front: RING[CP_A][0], back: RING[CP_B][0], floor: WELL,
+};
 
-// the deck strip pair that is cut away for the cockpit
-const COCKPIT_I = 3;
-const CP_FRONT = SECT[COCKPIT_I][0];      //  0.10
-const CP_BACK = SECT[COCKPIT_I + 1][0];   // -0.52
-const CP_X = 0.62 * SECT[COCKPIT_I][2];   //  half width of the opening
-export const SEAT = { x: CP_X, front: CP_FRONT, back: CP_BACK, floor: 0.52 };
+/**
+ * One cross-section outline: 22 points, bottom centre -> up the right flank ->
+ * over the deck -> down the left flank. The winding is what makes the lofted
+ * quads face outward, so keep the order. The shoulder is sampled finely enough
+ * that the roll-over reads as a curve rather than a crease.
+ */
+function ring(r) {
+  const z = r[0]; const w = r[1]; const top = r[2]; const bot = r[3];
+  const h = top - bot;
+  const half = [
+    [0.50 * w, bot],
+    [0.84 * w, bot + 0.045 * h],
+    [0.975 * w, bot + 0.20 * h],
+    [1.000 * w, bot + 0.40 * h],
+    [0.995 * w, bot + 0.62 * h],
+    [0.965 * w, bot + 0.80 * h],
+    [0.905 * w, bot + 0.90 * h],
+    [0.800 * w, top - 0.062],
+    [0.680 * w, top - 0.024],
+    [RIM * w, top - 0.002],
+  ];
+  const pts = [[0, bot, z]];
+  for (const p of half) pts.push([p[0], p[1], z]);
+  pts.push([0, top + 0.014, z]);
+  for (let i = half.length - 1; i >= 0; i--) pts.push([-half[i][0], half[i][1], z]);
+  return pts;
+}
 
-/** Top surface: crowned strips so the bodywork catches light across its beam. */
-function deckFaces(out, col) {
-  for (let i = 0; i < SECT.length - 1; i++) {
-    const a = SECT[i]; const b = SECT[i + 1];
-    for (let j = 0; j < LAT.length - 1; j++) {
-      if (i === COCKPIT_I && j >= 1 && j <= 3) continue;   // seat well opening
-      const u0 = LAT[j]; const u1 = LAT[j + 1];
-      out.push({
-        col,
-        pts: [
-          [u0 * a[2], deckY(a, u0), a[0]],
-          [u1 * a[2], deckY(a, u1), a[0]],
-          [u1 * b[2], deckY(b, u1), b[0]],
-          [u0 * b[2], deckY(b, u0), b[0]],
-        ],
-      });
+const K = 22;                 // points (and strips) per ring
+const CUT_A = 10;             // the two strips over the cockpit opening
+const CUT_B = 11;
+
+// which paint each of the 22 strips wears
+const BAND = ['pan', 'sill', 'low', 'low', 'side', 'side', 'side',
+  'deck', 'deck', 'deck', 'deck', 'deck', 'deck', 'deck', 'deck',
+  'side', 'side', 'side', 'low', 'low', 'sill', 'pan'];
+
+/** The whole hull: one quad strip per ring pair, plus a nose and a tail cap. */
+function hullFaces(out, col) {
+  const rings = RING.map(ring);
+  for (let i = 0; i < rings.length - 1; i++) {
+    const a = rings[i]; const b = rings[i + 1];
+    const cut = i >= CP_A && i < CP_B;
+    for (let j = 0; j < K; j++) {
+      if (cut && (j === CUT_A || j === CUT_B)) continue;   // seat well opening
+      const k = (j + 1) % K;
+      out.push({ col: col[BAND[j]], pts: [a[j], b[j], b[k], a[k]] });
     }
   }
+  out.push({ col: col.low, pts: rings[0] });
+  out.push({ col: col.tail, pts: rings[rings.length - 1].slice().reverse() });
 }
 
-/** Flanks: an upper shoulder that rolls over, then the vertical sill. */
-function flankFaces(out, col, sill) {
-  for (const sx of [-1, 1]) {
-    for (let i = 0; i < SECT.length - 1; i++) {
-      const a = SECT[i]; const b = SECT[i + 1];
-      const ay = deckY(a, 1); const by = deckY(b, 1);
-      const mid = 0.58;
-      out.push({
-        col,
-        pts: sx > 0
-          ? [[a[2], ay, a[0]], [b[2], by, b[0]], [b[2] * 1.02, mid, b[0]], [a[2] * 1.02, mid, a[0]]]
-          : [[-a[2] * 1.02, mid, a[0]], [-b[2] * 1.02, mid, b[0]], [-b[2], by, b[0]], [-a[2], ay, a[0]]],
-      });
-      out.push({
-        col: sill,
-        pts: sx > 0
-          ? [[a[2] * 1.02, mid, a[0]], [b[2] * 1.02, mid, b[0]], [b[2] * 0.94, FLOOR, b[0]], [a[2] * 0.94, FLOOR, a[0]]]
-          : [[-a[2] * 0.94, FLOOR, a[0]], [-b[2] * 0.94, FLOOR, b[0]], [-b[2] * 1.02, mid, b[0]], [-a[2] * 1.02, mid, a[0]]],
-      });
-    }
-  }
-}
-
-/** Floor pan, nose cap and tail panel. */
-function capFaces(out, col, dark, tail) {
-  const f = SECT[0]; const r = SECT[SECT.length - 1];
-  out.push({
-    col: dark, two: true, flat: 0.35,
-    pts: [[-f[2] * 0.94, FLOOR, f[0]], [f[2] * 0.94, FLOOR, f[0]],
-      [r[2] * 0.94, FLOOR, r[0]], [-r[2] * 0.94, FLOOR, r[0]]],
-  });
-  out.push({
-    col,
-    pts: [[-f[2], deckY(f, -1), f[0]], [f[2], deckY(f, 1), f[0]],
-      [f[2] * 0.94, FLOOR, f[0]], [-f[2] * 0.94, FLOOR, f[0]]],
-  });
-  out.push({
-    col: tail,
-    pts: [[r[2] * 0.94, FLOOR, r[0]], [r[2], deckY(r, 1), r[0]],
-      [-r[2], deckY(r, -1), r[0]], [-r[2] * 0.94, FLOOR, r[0]]],
-  });
-}
-
-/** Seat well: floor, dash bulkhead, side walls, seat back. */
-function cockpitFaces(out, col, dark, trim) {
-  const x = SEAT.x; const fz = SEAT.front; const bz = SEAT.back; const fy = SEAT.floor;
-  const sz = bz - 0.30;              // back of the seat shell
-  const topY = deckY(SECT[COCKPIT_I], 0.5);
-  out.push({ col: dark, flat: 0.4, two: true, lift: 0.02,
-    pts: [[-x, fy, fz], [x, fy, fz], [x, fy, sz], [-x, fy, sz]] });
-  // dash bulkhead
-  out.push({ col: dark, two: true, lift: 0.05,
-    pts: [[-x, fy, fz], [x, fy, fz], [x * 0.92, topY, fz], [-x * 0.92, topY, fz]] });
-  // side walls of the well
-  for (const sx of [-1, 1]) {
-    out.push({ col: dark, two: true, lift: 0.05,
-      pts: [[sx * x, fy, fz], [sx * x, fy, sz], [sx * x * 0.95, topY, sz], [sx * x * 0.95, topY, fz]] });
-  }
-  // seat back shell
-  const sy = 1.10;
-  out.push({ col: trim, lift: 0.10,
-    pts: [[-x * 0.82, fy, bz], [x * 0.82, fy, bz], [x * 0.70, sy, bz + 0.04], [-x * 0.70, sy, bz + 0.04]] });
-  out.push({ col: col,
-    pts: [[x * 0.86, fy, sz], [-x * 0.86, fy, sz], [-x * 0.74, sy - 0.03, sz], [x * 0.74, sy - 0.03, sz]] });
-  out.push({ col: H(col, '#ffffff', 0.2),
-    pts: [[-x * 0.70, sy, bz + 0.04], [x * 0.70, sy, bz + 0.04], [x * 0.74, sy - 0.03, sz], [-x * 0.74, sy - 0.03, sz]] });
-  for (const sx of [-1, 1]) {
-    out.push({ col,
-      pts: [[sx * x * 0.82, fy, bz], [sx * x * 0.86, fy, sz], [sx * x * 0.74, sy - 0.03, sz], [sx * x * 0.70, sy, bz + 0.04]] });
-  }
-}
-
-/** Rear diffuser box, brake lights, plate and exhaust tips. */
-function rearFaces(out, body, trim, dark) {
-  const r = SECT[SECT.length - 1];
-  const z0 = r[0]; const z1 = r[0] - 0.13;
-  const w = r[2] * 0.98;
-  out.push({ col: dark, pts: [[-w, 0.26, z1], [w, 0.26, z1], [w, 0.68, z1], [-w, 0.68, z1]] });
-  out.push({ col: H(dark, '#ffffff', 0.14), pts: [[-w, 0.68, z1], [w, 0.68, z1], [w * 1.02, 0.70, z0], [-w * 1.02, 0.70, z0]] });
-  for (const sx of [-1, 1]) {
-    out.push({ col: '#e8323a', lift: 0.10,
-      pts: [[sx * w * 0.44, 0.40, z1], [sx * w * 0.86, 0.40, z1], [sx * w * 0.86, 0.58, z1], [sx * w * 0.44, 0.58, z1]] });
-    out.push({ col: '#c0c8d2', lift: 0.10,
-      pts: [[sx * w * 0.62, 0.28, z1], [sx * w * 0.86, 0.28, z1], [sx * w * 0.86, 0.38, z1], [sx * w * 0.62, 0.38, z1]] });
-  }
-  out.push({ col: '#f2f5f8', lift: 0.10,
-    pts: [[-w * 0.30, 0.38, z1], [w * 0.30, 0.38, z1], [w * 0.30, 0.60, z1], [-w * 0.30, 0.60, z1]] });
-  out.push({ col: trim, lift: 0.11,
-    pts: [[-w * 0.24, 0.42, z1], [w * 0.24, 0.42, z1], [w * 0.24, 0.56, z1], [-w * 0.24, 0.56, z1]] });
+/** Axis-aligned box, six outward-facing quads. Used for every add-on part. */
+function box(out, ax0, ax1, ay0, ay1, az0, az1, c) {
+  const xl = Math.min(ax0, ax1); const xr = Math.max(ax0, ax1);
+  const yb = Math.min(ay0, ay1); const yt = Math.max(ay0, ay1);
+  const zb = Math.min(az0, az1); const zf = Math.max(az0, az1);
+  const side = c.side; const bot = c.bot || side;
+  const front = c.front || side; const back = c.back || side;
+  // Faces are painter-sorted on their average depth, so a small part bolted to
+  // a big one needs a depth bias or the parent panel's centroid can win and
+  // swallow it (an off-centre brake lens vanishing into the bumper).
+  const L = c.lift || 0;
+  const q = (col, pts) => out.push({ col, pts, lift: L });
+  q(c.top, [[xl, yt, zb], [xl, yt, zf], [xr, yt, zf], [xr, yt, zb]]);
+  q(bot, [[xl, yb, zf], [xl, yb, zb], [xr, yb, zb], [xr, yb, zf]]);
+  q(front, [[xl, yb, zf], [xr, yb, zf], [xr, yt, zf], [xl, yt, zf]]);
+  q(back, [[xr, yb, zb], [xl, yb, zb], [xl, yt, zb], [xr, yt, zb]]);
+  q(side, [[xr, yb, zf], [xr, yb, zb], [xr, yt, zb], [xr, yt, zf]]);
+  q(side, [[xl, yb, zb], [xl, yb, zf], [xl, yt, zf], [xl, yt, zb]]);
 }
 
 /**
- * Ducktail lip across the tail. The reference karts are roadsters, not formula
- * cars - a full aero wing at seat height cuts the rider in half, so this is a
- * low kicked-up spoiler that hugs the rear deck.
+ * A rounded-rectangle outline in the x/z plane at height `y`, wound so that
+ * loft() below turns a stack of them into an outward-facing shell. `p` sets how
+ * boxy the corners are (2 = ellipse, 4 = nearly square).
  */
-function spoilerFaces(out, body, trim) {
-  const z0 = -0.98; const z1 = -1.18; const y = 0.92; const w = 0.50;
-  const dk = H(trim, '#000000', 0.34);
-  for (const sx of [-1, 1]) {
-    const a = sx * 0.30; const b = sx * 0.46;
-    out.push({ col: dk, two: true, pts: [[a, 0.64, z0], [b, 0.64, z0], [b, y, z0], [a, y, z0]] });
+function plateRing(y, hx, zf, zb, p = 2.7) {
+  const cz = (zf + zb) / 2; const hz = (zf - zb) / 2;
+  const N = 12;
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const ca = Math.cos(a); const sa = Math.sin(a);
+    const k = (Math.abs(ca) ** p + Math.abs(sa) ** p) ** (-1 / p);
+    pts.push([ca * k * hx, y, cz + sa * k * hz]);
   }
-  // plate: top, underside, trailing edge
-  out.push({ col: H(trim, '#ffffff', 0.26), pts: [[-w, y + 0.05, z1], [w, y + 0.05, z1], [w, y + 0.10, z0], [-w, y + 0.10, z0]] });
-  out.push({ col: H(trim, '#000000', 0.34), two: true, pts: [[-w, y - 0.09, z1], [w, y - 0.09, z1], [w, y - 0.04, z0], [-w, y - 0.04, z0]] });
-  out.push({ col: H(trim, '#000000', 0.06), pts: [[-w, y - 0.09, z1], [w, y - 0.09, z1], [w, y + 0.05, z1], [-w, y + 0.05, z1]] });
-  // end fins
-  for (const sx of [-1, 1]) {
-    out.push({ col: trim, two: true,
-      pts: [[sx * w, y - 0.09, z1], [sx * w, y + 0.10, z0], [sx * w, y + 0.20, z0 - 0.02], [sx * w, y + 0.15, z1 + 0.03]] });
+  return pts;
+}
+
+/**
+ * Plan-view outline at height `y` from a front->back list of [z, half width].
+ * Wound the same way as plateRing() so both feed loft() unchanged; use it for
+ * add-on parts (bumper, ducktail) that must follow the hull's taper rather than
+ * sit across it as a straight-edged slab.
+ */
+function planRing(y, spans, k = 1) {
+  const pts = [];
+  for (let i = spans.length - 1; i >= 0; i--) pts.push([spans[i][1] * k, y, spans[i][0]]);
+  for (const s of spans) pts.push([-s[1] * k, y, s[0]]);
+  return pts;
+}
+
+/**
+ * Stitch a stack of equal-length rings (bottom -> top) into a closed shell.
+ * Faces come out wound outward, so they cull and painter-sort like the hull -
+ * that is what stops a seat back from punching through the bodywork.
+ */
+function loft(out, rings, colOf, lift = 0) {
+  const N = rings[0].length;
+  for (let i = 0; i < rings.length - 1; i++) {
+    const lo = rings[i]; const up = rings[i + 1];
+    for (let j = 0; j < N; j++) {
+      const k = (j + 1) % N;
+      out.push({ col: colOf(j), lift, pts: [lo[j], up[j], up[k], lo[k]] });
+    }
   }
+}
+
+/**
+ * Moulded bucket seat: a tapered loft (cushion + shoulders + head pad) rather
+ * than a stack of boxes, so nothing juts past the flanks and the whole thing
+ * sits inside the cockpit opening.
+ */
+function seatFaces(out, seat, trim) {
+  const dark = H(seat, '#000000', 0.34);
+  const mid = H(seat, '#000000', 0.14);
+  const lite = H(seat, '#ffffff', 0.12);
+  // cushion
+  const cushion = [
+    plateRing(WELL - 0.01, 0.355, -0.02, -0.50),
+    plateRing(WELL + 0.075, 0.335, -0.05, -0.49),
+  ];
+  loft(out, cushion, () => mid, 0.01);
+  out.push({ col: lite, lift: 0.02, pts: cushion[1].slice().reverse() });
+  // back rest -> head pad, each ring narrower and shorter than the one below
+  const S = [
+    [WELL + 0.02, 0.360, -0.335, -0.640],
+    [0.700, 0.352, -0.375, -0.646],
+    [0.870, 0.330, -0.420, -0.644],
+    [0.990, 0.292, -0.452, -0.634],
+    [1.078, 0.232, -0.478, -0.616],
+    [1.132, 0.146, -0.500, -0.594],
+  ];
+  const back = S.map((r) => plateRing(r[0], r[1], r[2], r[3]));
+  const face = (j) => {
+    const s = Math.sin((j / 12) * Math.PI * 2);
+    return s > 0.5 ? seat : s < -0.5 ? dark : mid;
+  };
+  loft(out, back, face, 0.01);
+  out.push({ col: H(trim, '#ffffff', 0.18), lift: 0.02, pts: back[back.length - 1].slice().reverse() });
+}
+
+/**
+ * Seat well: the recess inside the hull opening. Its rim is exactly the hull's
+ * cockpit-opening edge, so the well meets the bodywork on a shared edge instead
+ * of overlapping it.
+ */
+function cockpitFaces(out, dark, seat, trim, shelf) {
+  const lip = (r) => RIM * r[1];
+  const rimY = (r) => r[2] + 0.008;
+  for (let i = CP_A; i < CP_B; i++) {
+    const a = RING[i]; const b = RING[i + 1];
+    out.push({ col: dark, flat: 0.42, two: true, lift: 0.03,
+      pts: [[-lip(a) * 0.9, WELL, a[0]], [lip(a) * 0.9, WELL, a[0]],
+        [lip(b) * 0.9, WELL, b[0]], [-lip(b) * 0.9, WELL, b[0]]] });
+    for (const sx of [-1, 1]) {
+      out.push({ col: dark, flat: 0.5, two: true, lift: 0.05,
+        pts: [[sx * lip(a), rimY(a), a[0]], [sx * lip(b), rimY(b), b[0]],
+          [sx * lip(b) * 0.9, WELL, b[0]], [sx * lip(a) * 0.9, WELL, a[0]]] });
+    }
+  }
+  // bulkheads closing the front (dash) and back (parcel shelf) of the well
+  for (const idx of [CP_A, CP_B]) {
+    const f = RING[idx];
+    out.push({ col: dark, flat: 0.5, two: true, lift: 0.04,
+      pts: [[-lip(f), rimY(f), f[0]], [lip(f), rimY(f), f[0]],
+        [lip(f) * 0.9, WELL, f[0]], [-lip(f) * 0.9, WELL, f[0]]] });
+  }
+  // parcel shelf: closes the deck between the seat back and the rear bulkhead so
+  // the cockpit never opens into a black slot behind the rider
+  const a = RING[CP_B - 1]; const b = RING[CP_B];
+  const t = 0.20;
+  const zs = a[0] + (b[0] - a[0]) * t;
+  const ws = (a[1] + (b[1] - a[1]) * t) * RIM;
+  const ys = a[2] + (b[2] - a[2]) * t;
+  out.push({ col: shelf, lift: 0.02,
+    pts: [[-ws, ys, zs], [ws, ys, zs], [lip(b), rimY(b), b[0]], [-lip(b), rimY(b), b[0]]] });
+  out.push({ col: dark, flat: 0.5, two: true, lift: 0.03,
+    pts: [[-ws, ys, zs], [-ws * 0.92, WELL, zs], [ws * 0.92, WELL, zs], [ws, ys, zs]] });
+  seatFaces(out, seat, trim);
+}
+
+/**
+ * Rear bumper: a lofted band whose plan follows the boat tail and whose top and
+ * bottom edges tuck in, so it wraps the hull instead of crossing it as a plank.
+ * Only its centre panel is flat, and that is where the lights and plate live.
+ */
+const BUMP = [[-1.05, 0.625], [-1.17, 0.620], [-1.26, 0.595], [-1.305, 0.545], [-1.325, 0.44]];
+
+function rearFaces(out, trim, dark) {
+  const rings = [
+    planRing(0.30, BUMP, 0.90),
+    planRing(0.40, BUMP, 1.00),
+    planRing(0.575, BUMP, 1.00),
+    planRing(0.665, BUMP, 0.90),
+  ];
+  const lo = H(dark, '#000000', 0.16);
+  loft(out, rings, () => dark, 0.06);
+  out.push({ col: H(dark, '#ffffff', 0.16), lift: 0.07, pts: rings[3].slice().reverse() });
+  out.push({ col: lo, lift: 0.07, pts: rings[0] });
+  for (const sx of [-1, 1]) {
+    // lens pads, standing proud of the bumper's flat centre panel
+    box(out, sx * 0.20, sx * 0.42, 0.395, 0.565, -1.325, -1.348,
+      { top: '#f0666c', back: '#e8323a', front: '#e8323a', side: '#c02a32', lift: 0.40 });
+  }
+  box(out, -0.155, 0.155, 0.385, 0.555, -1.325, -1.344,
+    { top: '#f2f5f8', back: '#f2f5f8', front: '#f2f5f8', side: '#c9ced6', lift: 0.40 });
+  out.push({ col: trim, lift: 0.46,
+    pts: [[-0.105, 0.415, -1.347], [0.105, 0.415, -1.347], [0.105, 0.520, -1.347], [-0.105, 0.520, -1.347]] });
+}
+
+/**
+ * Ducktail lip kicked up off the rear deck. The reference karts are roadsters,
+ * not formula cars - a wing on struts at seat height cuts straight across the
+ * rider - so the spoiler is a low integrated lip that hugs the boat tail.
+ */
+function spoilerFaces(out, trim) {
+  // plan follows the tail taper; the base ring sits below the deck line so the
+  // lip grows out of the bodywork instead of hovering over it
+  const S = [[-0.80, 0.545], [-0.94, 0.530], [-1.06, 0.480], [-1.14, 0.395], [-1.185, 0.275]];
+  const rings = [planRing(0.945, S, 1.00), planRing(1.020, S, 0.97), planRing(1.072, S, 0.86)];
+  loft(out, rings, () => trim, 0.05);
+  out.push({ col: H(trim, '#ffffff', 0.26), lift: 0.06, pts: rings[2].slice().reverse() });
 }
 
 // ---- wheels -------------------------------------------------------------
-const WN = 20;
+const TREAD = '#191d25';
+const WALL = '#101319';
 
 /**
- * One wheel as a short cylinder. `steer` turns it about its own vertical axis
- * (so the fronts point where the kart is steering) and `spin` rolls the tread
- * blocks, which is what makes the kart read as moving rather than sliding.
+ * Stub axle: a short barrel from the hull flank out to a wheel's inboard face.
+ * Without it the tyres read as donuts parked next to the kart; with it the eye
+ * follows the hub straight back into the bodywork.
  */
-export function wheelFaces(out, cx, cz, r, hw, steer, spin, rim) {
+function axleFaces(out, sx, cz, y, x0, x1, r, col) {
+  const N = 8;
+  const ring2 = (x, rr) => {
+    const p = [];
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      p.push([sx * x, y + Math.cos(a) * rr, cz + Math.sin(a) * rr]);
+    }
+    return p;
+  };
+  const a = ring2(x0, r * 1.25); const b = ring2(x1, r);
+  for (let i = 0; i < N; i++) {
+    const k = (i + 1) % N;
+    out.push({ col, two: true, flat: 0.8, lift: 0.02, pts: [a[i], b[i], b[k], a[k]] });
+  }
+}
+
+/**
+ * One wheel: a barrelled cylinder (the crown bulges, the shoulders tuck in, so
+ * the highlight rolls round the tyre instead of banding it like a tank track),
+ * capped each side by a sidewall annulus, a silver rim disc and a hub cap.
+ * `steer` turns it about its own vertical axis, `spin` rolls it.
+ */
+export function wheelFaces(out, cx, cz, r, hw, steer, spin, rim, lod = 1) {
+  const WN = lod ? 22 : 10;
+  const BANDS = lod ? [-1, -0.45, 0.45, 1] : [-1, 1];
   const axx = Math.cos(steer); const axz = -Math.sin(steer);
   const fwx = Math.sin(steer); const fwz = Math.cos(steer);
-  const P = (a, side) => [
-    cx + fwx * Math.sin(a) * r + axx * side * hw,
-    r + Math.cos(a) * r,
-    cz + fwz * Math.sin(a) * r + axz * side * hw,
-  ];
+  // radius at lateral position u (-1 outer .. 1 outer): barrel profile
+  const rad = (u) => r * (0.945 + 0.055 * (1 - u * u));
+  const P = (a, u, k) => {
+    const rr = (k == null ? rad(u) : r * k);
+    return [
+      cx + fwx * Math.sin(a) * rr + axx * u * hw,
+      r + Math.cos(a) * rr,
+      cz + fwz * Math.sin(a) * rr + axz * u * hw,
+    ];
+  };
+  const A = (i) => spin + (i / WN) * Math.PI * 2;
   for (let i = 0; i < WN; i++) {
-    const a0 = spin + (i / WN) * Math.PI * 2;
-    const a1 = spin + ((i + 1) / WN) * Math.PI * 2;
-    out.push({
-      col: i % 2 ? '#1b1f27' : '#101319',
-      flat: 0.62,
-      pts: [P(a0, -1), P(a1, -1), P(a1, 1), P(a0, 1)],
-    });
+    const a0 = A(i); const a1 = A(i + 1);
+    for (let b = 0; b < BANDS.length - 1; b++) {
+      const u0 = BANDS[b]; const u1 = BANDS[b + 1];
+      out.push({
+        col: TREAD, flat: 0.9,
+        pts: [P(a0, u0), P(a1, u0), P(a1, u1), P(a0, u1)],
+      });
+    }
   }
   for (const side of [-1, 1]) {
-    const disc = [];
-    const hub = [];
-    for (let i = 0; i < WN; i++) {
-      const a = spin + (i / WN) * Math.PI * 2;
-      disc.push(P(a, side));
-      const p = P(a, side * 1.02);
-      hub.push([cx + (p[0] - cx) * 0.56, r + (p[1] - r) * 0.56, cz + (p[2] - cz) * 0.56]);
+    // sidewall: annulus from the tyre shoulder in to the rim
+    if (lod) {
+      for (let i = 0; i < WN; i++) {
+        const a0 = A(i); const a1 = A(i + 1);
+        out.push({
+          col: WALL, flat: 0.5, two: true, lift: 0.01,
+          pts: [P(a0, side, 0.945), P(a0, side, 0.645), P(a1, side, 0.645), P(a1, side, 0.945)],
+        });
+      }
     }
-    // The discs are close to edge-on from a chase camera, so they must be
-    // two-sided or the rims vanish and each tyre reads as a black block.
-    out.push({ col: '#15181e', flat: 0.55, two: true, pts: disc });
-    out.push({ col: rim, flat: 0.8, two: true, lift: 0.06, pts: hub });
+    const disc = []; const hub = [];
+    for (let i = 0; i < WN; i++) {
+      disc.push(P(A(i), side * 1.02, 0.645));
+      hub.push(P(A(i), side * 1.05, 0.285));
+    }
+    // Near edge-on from a chase camera, so both must be two-sided or the rims
+    // vanish and each tyre reads as a solid black block.
+    out.push({ col: '#dfe5ed', flat: 0.72, two: true, lift: 0.03, pts: disc });
+    out.push({ col: rim, flat: 0.85, two: true, lift: 0.05, pts: hub });
   }
 }
 
@@ -292,84 +449,51 @@ function rgbOf(hex) {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-/** Livery: a swept accent flash up each flank, floated just off the bodywork. */
-function liveryFaces(out, trim) {
-  for (const sx of [-1, 1]) {
-    const q = (i) => SECT[i];
-    for (let i = 1; i <= 4; i++) {
-      const a = q(i); const b = q(i + 1);
-      const ta = 0.30 + (i - 1) * 0.06;
-      const tb = 0.30 + i * 0.06;
-      out.push({
-        col: trim, lift: 0.06,
-        pts: sx > 0
-          ? [[a[2] * 1.006, ta, a[0]], [b[2] * 1.006, tb, b[0]],
-            [b[2] * 1.006, tb + 0.24, b[0]], [a[2] * 1.006, ta + 0.24, a[0]]]
-          : [[-a[2] * 1.006, ta + 0.24, a[0]], [-b[2] * 1.006, tb + 0.24, b[0]],
-            [-b[2] * 1.006, tb, b[0]], [-a[2] * 1.006, ta, a[0]]],
-      });
-    }
-  }
-}
-
-
-/** (unused) Fender pod over a wheel - kept for reference, see buildKart. */
-function podFaces(out, col, sx, zc, len, xIn, xOut, yTop, yBot) {
-  const z0 = zc + len; const z1 = zc - len;
-  const xi = sx * xIn; const xo = sx * xOut;
-  const yo = yTop - 0.06;
-  // top
-  out.push({ col, pts: [[xi, yTop, z0], [xo, yo, z0], [xo, yo, z1], [xi, yTop, z1]] });
-  // outer wall
-  out.push({ col: H(col, '#000000', 0.16), pts: sx > 0
-    ? [[xo, yo, z0], [xo, yBot, z0], [xo, yBot, z1], [xo, yo, z1]]
-    : [[xo, yo, z1], [xo, yBot, z1], [xo, yBot, z0], [xo, yo, z0]] });
-  // front / rear caps
-  out.push({ col: H(col, '#ffffff', 0.10), pts: [[xi, yTop, z0], [xi, yBot, z0], [xo, yBot, z0], [xo, yo, z0]] });
-  out.push({ col: H(col, '#000000', 0.30), pts: [[xo, yo, z1], [xo, yBot, z1], [xi, yBot, z1], [xi, yTop, z1]] });
-}
-
-/** Bonnet stripes - the two-tone flash the reference karts wear down the nose. */
-function stripeFaces(out, col) {
-  for (let i = 0; i < 3; i++) {
-    const a = SECT[i]; const b = SECT[i + 1];
-    for (const u of [-0.40, 0.40]) {
-      const w0 = 0.13; 
-      out.push({ col, lift: 0.05, pts: [
-        [(u - w0) * a[2], deckY(a, u - w0) + 0.006, a[0]],
-        [(u + w0) * a[2], deckY(a, u + w0) + 0.006, a[0]],
-        [(u + w0) * b[2], deckY(b, u + w0) + 0.006, b[0]],
-        [(u - w0) * b[2], deckY(b, u - w0) + 0.006, b[0]],
-      ] });
-    }
-  }
-}
-
-export const AXLE = { front: 1.06, rear: REAR_Z, x: 0.84, rf: 0.38, rr: 0.44, hw: 0.105 };
+// Track is set so each tyre's inboard sidewall sits ~0.03 outside the hip it
+// belongs to: no daylight between wheel and bodywork, and the rim disc still
+// clears the hull silhouette so both hubs read from a straight-on chase view.
+export const AXLE = {
+  front: 0.96, rear: REAR_Z, xf: 0.735, xr: 0.822, rf: 0.268, rr: 0.298, hwf: 0.082, hwr: 0.092,
+};
 
 /**
  * Whole kart body (no rider). `steer` is the front-wheel angle in radians,
  * `spin` the tyre roll phase.
  */
-export function buildKart({ body, trim, livery, steer = 0, spin = 0 }) {
+export function buildKart({ body, trim, livery, steer = 0, spin = 0, lod = 1 }) {
   const base = hexish(body);
   const acc = hexish(livery || trim);
-  const sill = H(acc, '#000000', 0.30);
-  const dark = H(base, '#0b0d12', 0.72);
   const out = [];
-  capFaces(out, base, dark, H(acc, '#000000', 0.42));
-  flankFaces(out, base, sill);
-  deckFaces(out, base);
-  liveryFaces(out, acc);
-  cockpitFaces(out, base, dark, H(acc, '#000000', 0.18));
-  rearFaces(out, base, acc, H(acc, '#000000', 0.52));
-  spoilerFaces(out, base, acc);
-  stripeFaces(out, acc);
-  wheelFaces(out, -AXLE.x, AXLE.front, AXLE.rf, AXLE.hw, steer, spin, acc);
-  wheelFaces(out, AXLE.x, AXLE.front, AXLE.rf, AXLE.hw, steer, spin, acc);
-  wheelFaces(out, -AXLE.x * 1.02, AXLE.rear, AXLE.rr, AXLE.hw * 1.4, 0, spin * 0.86, acc);
-  wheelFaces(out, AXLE.x * 1.02, AXLE.rear, AXLE.rr, AXLE.hw * 1.4, 0, spin * 0.86, acc);
+  hullFaces(out, {
+    pan: H(base, '#0b0d12', 0.66),
+    sill: H(acc, '#000000', 0.42),
+    low: acc,
+    side: base,
+    deck: base,
+    tail: H(base, '#000000', 0.10),
+  });
+  // Upholstery is charcoal with only a hint of the livery in it. Deriving it
+  // straight from the accent paints a light seat into a dark kart (Gengar's
+  // silver livery put a white cushion on a purple shell, reading as a separate
+  // lump sitting on the deck instead of a seat sunk into the well).
+  const seat = H(acc, '#16181e', 0.72);
+  cockpitFaces(out, H(base, '#0b0d12', 0.70), seat, H(seat, '#000000', 0.10), H(base, '#000000', 0.16));
+  rearFaces(out, acc, H(acc, '#000000', 0.50));
+  // The ducktail is body-coloured, a shade down. In the livery colour a pale
+  // accent (Gengar's silver on purple) reads as a foreign white slab parked on
+  // the deck; in the shell's own paint the lofted lip is defined by its own
+  // shading and reads as moulded bodywork, which is what the reference shows.
+  spoilerFaces(out, H(base, '#000000', 0.13));
+  const hub = '#31373f';
+  for (const sx of [-1, 1]) {
+    axleFaces(out, sx, AXLE.rear, AXLE.rr, 0.56, AXLE.xr - AXLE.hwr + 0.01, 0.125, hub);
+    axleFaces(out, sx, AXLE.front, AXLE.rf, 0.44, AXLE.xf - AXLE.hwf + 0.01, 0.085, hub);
+  }
+  wheelFaces(out, -AXLE.xf, AXLE.front, AXLE.rf, AXLE.hwf, steer, spin, acc, lod);
+  wheelFaces(out, AXLE.xf, AXLE.front, AXLE.rf, AXLE.hwf, steer, spin, acc, lod);
+  wheelFaces(out, -AXLE.xr, AXLE.rear, AXLE.rr, AXLE.hwr, 0, spin * 0.92, acc, lod);
+  wheelFaces(out, AXLE.xr, AXLE.rear, AXLE.rr, AXLE.hwr, 0, spin * 0.92, acc, lod);
   return out;
 }
 
-export { SECT, FLOOR, deckY, H, podFaces };
+export { RING, FLOOR, H };

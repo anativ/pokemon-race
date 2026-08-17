@@ -53,7 +53,13 @@ export function drawKart(c, x, y, s, racer, opts = {}) {
   const steer = clamp(opts.steer != null ? opts.steer : (opts.lean || 0), -1, 1);
   const drift = clamp(opts.drift || 0, 0, 1);
   const base = opts.yaw != null ? opts.yaw : 0.18;
-  const yaw = clamp(base + steer * 0.42 + drift * Math.sign(steer || 1) * 0.18, -0.95, 0.95);
+  const raw = base + steer * 0.42 + drift * Math.sign(steer || 1) * 0.18;
+  // Present the chassis at a real three-quarter angle. Head-on (|yaw| < ~0.2)
+  // the near-side front and rear tyres project onto the same screen column and
+  // fuse into one tall barrel, and every wheel is edge-on so no hub shows. The
+  // boost is smooth and sign-preserving, so the kart still swings the way the
+  // driver steers - it just never sits in that degenerate straight-on pose.
+  const yaw = clamp(raw + 0.20 * Math.tanh(raw / 0.10), -0.98, 0.98);
   const roll = clamp((opts.roll || 0) - steer * 0.13, -0.20, 0.20);
   const pitch = clamp(opts.pitch || 0, -0.12, 0.12);
   const wheelSteer = clamp(steer * 0.55, -0.6, 0.6);
@@ -67,15 +73,15 @@ export function drawKart(c, x, y, s, racer, opts = {}) {
   const frame = makeFrame(s, { yaw, roll, pitch });
   drawTail(c, frame, sp, opts.time || 0);
   drawBackRig(c, frame, sp);
-  paint(c, frame, buildKart({ body, trim, livery, steer: wheelSteer, spin }), {
+  paint(c, frame, buildKart({ body, trim, livery, steer: wheelSteer, spin, lod: detail ? 1 : 0 }), {
     ambient: opts.ambient || 0,
   });
-  drawDriver(c, frame, sp, racer, { grip: steer, detail, livery });
+  drawDriver(c, frame, sp, racer, { grip: steer, detail, livery, ambient: opts.ambient || 0 });
 
   if (detail && Math.abs(yaw) < 0.62) {
-    const p = frame.p(0, 0.34, -1.27);
-    const u = frame.unit(-1.27);
-    emblem(c, p.x, p.y, u * 0.085, sp.emblem, tint(livery, 0.95));
+    const p = frame.p(0, 0.47, -1.33);
+    const u = frame.unit(-1.33);
+    emblem(c, p.x, p.y, u * 0.062, sp.emblem, tint(livery, 0.95));
   }
 
   c.restore();

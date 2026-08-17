@@ -1,0 +1,11 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage();
+page.on('console', m => console.log('C:', m.type(), m.text()));
+page.on('pageerror', e => console.log('PE:', e.message));
+await page.goto(`${url}/index.html?screen=race&track=pallet-town&racer=pikachu`);
+await page.waitForTimeout(2500);
+console.log('ready?', await page.evaluate(() => !!(window.__pkr && window.__pkr.isReady)));
+await browser.close(); await close();

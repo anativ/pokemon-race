@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:0;background:#7d8a72;font:12px system-ui;color:#fff}
+.row{display:flex;align-items:flex-end;gap:6px;padding:4px 8px;border-bottom:1px solid rgba(0,0,0,.2)}
+.n{width:78px}
+</style></head><body>
+<div id="out"></div>
+<script type="module">
+import { roster as ROSTER } from '../src/data/roster.js';
+import { drawKart } from '../src/race/kart.js';
+import { avatarSvg } from '../src/core/avatars.js';
+const out = document.getElementById('out');
+const only = new URLSearchParams(location.search).get('only');
+const list = only ? ROSTER.filter((r) => only.split(',').includes(r.id)) : ROSTER;
+for (const r of list) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const n = document.createElement('div'); n.className = 'n'; n.textContent = r.id;
+  row.appendChild(n);
+  const av = document.createElement('div'); av.innerHTML = avatarSvg(r, 90); row.appendChild(av);
+  const sizes = new URLSearchParams(location.search).get('big')
+    ? [[130, 0.0], [130, 0.45]] : [[64, 0.0], [64, 0.5], [30, 0.0], [20, 0.0]];
+  for (const [s, yaw] of sizes) {
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(s * 4.2); cv.height = Math.round(s * 3.6);
+    const c = cv.getContext('2d');
+    drawKart(c, cv.width / 2, cv.height - s * 0.6, s, r, { yaw, steer: 0.1, time: 400 });
+    row.appendChild(cv);
+  }
+  out.appendChild(row);
+}
+window.__sheetReady = true;
+</script></body></html>

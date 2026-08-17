@@ -139,11 +139,20 @@ function drawFace(c, it, opt) {
   c.closePath();
 
   if (face.a != null) { c.save(); c.globalAlpha = face.a; }
-  c.fillStyle = typeof face.col === 'function' ? face.col(c, pts, t) : shadeOf(face.col, t);
+  const fill = typeof face.col === 'function' ? face.col(c, pts, t) : shadeOf(face.col, t);
+  c.fillStyle = fill;
   c.fill();
   if (face.line) {
     c.strokeStyle = face.line;
     c.lineWidth = face.lw || 1;
+    c.stroke();
+  } else if (face.a == null) {
+    // Canvas leaves an antialiased hairline between abutting polygons, which
+    // turns a smooth lofted shell into a wireframe of pale seams. Re-stroking
+    // each face in its own fill colour closes the gap.
+    c.strokeStyle = fill;
+    c.lineWidth = 1.25;
+    c.lineJoin = 'round';
     c.stroke();
   }
   if (face.a != null) c.restore();

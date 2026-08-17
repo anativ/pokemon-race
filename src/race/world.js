@@ -217,7 +217,14 @@ export function renderRaceWorld(c, ctx) {
     for (const it of list) {
       const s = Math.min(132, it.at.w * 0.155);
       if (s < 4) continue;
-      const a = (1 - Math.min(0.9, it.at.fog)) * clamp((it.dz - 66) / 26, 0, 1);
+      // Near fade-in. A kart body is a faceted MESH, so any mid alpha turns it
+      // into an X-ray wireframe (you read the inside faces and the rider's
+      // paws through the shell). Keep the band short and drop anything that
+      // would still be see-through: a rival this close to the camera sits
+      // under the hero at the bottom edge, so culling it costs nothing.
+      const nearIn = clamp((it.dz - 66) / 12, 0, 1);
+      if (nearIn < 0.5) continue;
+      const a = (1 - Math.min(0.9, it.at.fog)) * nearIn;
       if (a < 0.03) continue;
       // Keep every rival body out of the hero's silhouette. A kart that only
       // grazes it gets shouldered sideways; one that would be mostly swallowed

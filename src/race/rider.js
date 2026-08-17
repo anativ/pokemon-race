@@ -1,17 +1,35 @@
 /**
  * race-world / driver
  *
- * The Pokemon sitting in the kart's seat well. Everything is drawn inside
- * *kart-local planes* handed over by kart3d: `plane(frame, z)` installs a canvas
- * transform whose axes are the projected kart x/y axes at that depth, so the
- * rider is automatically foreshortened, leaned and shifted when the kart yaws
- * or rolls - no separate sprite, no symmetric cutout.
+ * The Pokemon sitting in the kart's seat well is the species itself, not a
+ * recoloured template:
+ *
+ *   - the whole driver - head, ears/horns/fins, snout, shell, wings, tail - is
+ *     the creature's own portrait art from src/core/avatars.js, rasterised once
+ *     per size bucket and billboarded into the kart's seat plane, cropped at the
+ *     cockpit rim. Scale is taken from that species' face circle, so the rider
+ *     and the HUD portrait beside it read at the same size and as the same
+ *     creature, and a Squirtle keeps its shell rim while a Garchomp keeps its
+ *     head fin;
+ *   - the arms are the only invented part, because a portrait has none: swept
+ *     limbs in kart-local space hung off the figure's own shoulder line and
+ *     closed on the wheel rim, pushed through the same projector and key light
+ *     as the bodywork (src/race/kart3d.js), with an inverted-hull ink pass so
+ *     they keep the portrait's dark outline;
+ *   - roster ids with no bespoke art fall back to the parametric driver below.
+ *
+ * Flat details (steering wheel, tail, shell) are drawn inside *kart-local
+ * planes* handed over by kart3d: `plane(frame, z)` installs a canvas transform
+ * whose axes are the projected kart x/y axes at that depth, so they are
+ * automatically foreshortened, leaned and shifted when the kart yaws or rolls.
  *
  * Plane coordinates: +x right, +y UP, 1 unit = half the kart's body width,
  * y = 0 is the road.
  */
 import { mix, roundRect } from './paint.js';
-import { tint } from './kartBody.js';
+import { tint, hexish } from './kartBody.js';
+import { paint } from './kart3d.js';
+import { riderArt, rigOf, riderSprite, ART_CUT, SPRITE_ASPECT, SPRITE_HALF } from './species.js';
 
 export const SEAT_Z = -0.30;    // torso plane
 export const HEAD_Z = -0.40;    // head plane
@@ -37,11 +55,16 @@ export function plane(c, frame, z) {
 
 /** Tail / back rigging drawn behind the seat. */
 export function drawTail(c, frame, sp, time) {
+  // Bespoke riders carry their own tail inside the portrait figure (Pikachu's
+  // bolt, Charizard's flame, Meowth's coin), so this parametric one would be a
+  // second tail - it only serves the generic fallback driver.
+  if (sp.art) return;
+  if (sp.tail === 'none') return;
   if (!plane(c, frame, BACK_Z)) return;
   const wag = Math.sin(time * 0.004) * 0.05;
-  c.translate(-0.30, 0.86);
+  c.translate(-0.34, 0.62);
   c.rotate(-wag);
-  c.scale(0.44, 0.44);
+  c.scale(0.40, 0.40);
   const t = sp.tail;
   if (t === 'bolt') {
     const g = c.createLinearGradient(0, 0, -0.5, 1.5);
@@ -129,8 +152,14 @@ export function drawTail(c, frame, sp, time) {
 /** Shell / bulb / wings mounted behind the seat. */
 export function drawBackRig(c, frame, sp) {
   const k = sp.back;
-  if (k === 'none') return;
+  // Squirtle's shell, Bulbasaur's bulb and Charizard's wings are all part of
+  // the portrait silhouette the bespoke rider stamps, so this generic rig is
+  // for the fallback driver only.
+  if (sp.art) return;
+  if (k === 'none' || k === 'wings') return;
   if (!plane(c, frame, BACK_Z + 0.06)) return;
+  c.scale(0.62, 0.62);
+  c.translate(0, 0.86);
   if (k === 'shell') {
     const g = c.createRadialGradient(-0.1, 1.05, 0.04, 0, 0.9, 0.6);
     g.addColorStop(0, '#c9853f');
@@ -357,6 +386,309 @@ function drawHelmet(c, hx, hy, r, col, turn) {
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+/* --------------------------------------------------------------- rider mesh
+ * The driver is built the way the kart is: real geometry in kart-local space,
+ * pushed through the same projector and shaded by the same key light, so the
+ * torso, shoulders and arms catch the light exactly like the bodywork they sit
+ * in. Only the face is a decal - and it is the species' own portrait art.
+ */
+export const ART_Z = -0.34;   // rider plane: the seat back
+const TAU = Math.PI * 2;
+
+/**
+ * Cross-section in the kart's x/z plane; k = 0 points forward. `p` bends the
+ * profile between a slab (p < 1: heavy, square-shouldered fighters) and a
+ * tapered wedge (p > 1: the lithe psychic / ninja builds).
+ */
+function ring(x, y, z, rx, rz, n, p = 1) {
+  const pts = [];
+  const bend = (v) => (p === 1 ? v : Math.sign(v) * Math.abs(v) ** p);
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * TAU;
+    pts.push([x + rx * bend(Math.sin(a)), y, z + rz * bend(Math.cos(a))]);
+  }
+  return pts;
+}
+
+/** Loft a stack of rings into quad strips. `col(k)` picks the paint per side. */
+function loft(out, rings, col, o = {}) {
+  const n = rings[0].length;
+  for (let i = 0; i < rings.length - 1; i++) {
+    const a = rings[i]; const b = rings[i + 1];
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n;
+      out.push({
+        col: typeof col === 'function' ? col(k, i) : col,
+        two: true, lift: o.lift || 0, pts: [a[k], a[j], b[j], b[k]],
+      });
+    }
+  }
+  if (o.cap) out.push({ col: o.cap, two: true, lift: (o.lift || 0) + 0.02, pts: rings[rings.length - 1] });
+}
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+function norm(v) {
+  const m = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / m, v[1] / m, v[2] / m];
+}
+
+/** A limb: circular sections swept along `path`, radius per node. */
+function limb(out, path, rad, col, n, lift) {
+  const rings = [];
+  for (let i = 0; i < path.length; i++) {
+    const p = path[i];
+    const d = norm(sub(path[Math.min(path.length - 1, i + 1)], path[Math.max(0, i - 1)]));
+    const ref = Math.abs(d[1]) > 0.86 ? [0, 0, 1] : [0, 1, 0];
+    const u = norm(cross(ref, d));
+    const v = cross(d, u);
+    const r = rad[i];
+    const pts = [];
+    for (let k = 0; k < n; k++) {
+      const t = (k / n) * TAU;
+      const cs = Math.cos(t) * r; const sn = Math.sin(t) * r;
+      pts.push([p[0] + u[0] * cs + v[0] * sn, p[1] + u[1] * cs + v[1] * sn, p[2] + u[2] * cs + v[2] * sn]);
+    }
+    rings.push(pts);
+  }
+  loft(out, rings, col, { cap: col, lift });
+}
+
+/** Same faces, pushed out from the rider's core - an ink pass for the body. */
+function swell(faces, k) {
+  const PY = 1.02; const PZ = -0.24;
+  return faces.map((f) => ({
+    col: '#1b1230', two: true, flat: 0, lift: f.lift != null ? f.lift : 0,
+    pts: f.pts.map((p) => [p[0] * k, PY + (p[1] - PY) * k, PZ + (p[2] - PZ) * k]),
+  }));
+}
+
+/**
+ * Seated body for one racer: hips sunk in the well, chest leaning at the wheel,
+ * shoulders carrying arms that reach the rim. Sizes come from the species rig,
+ * so a Snorlax fills the tub and a Gardevoir barely brushes its sides.
+ */
+function buildRider(rig, o) {
+  const { skin, belly, glove, grip, detail } = o;
+  const n = detail ? 10 : 6;
+  const out = [];
+  const sh = rig.sh; const dep = rig.dep;
+  const nk = rig.build === 'heavy' ? 0.13 : rig.build === 'slim' ? 0.095 : 0.11;
+  const tilt = grip * 0.035;
+  // Torso: waist at the cockpit rim -> chest -> shoulders -> neck. The hips
+  // stay under the deck line; from a chase camera a driver is shoulders, arms
+  // and head, and anything lower would paint over the bodywork in front of it.
+  const stack = [
+    [0.82, -0.34, sh * 0.84, dep * 0.94],
+    [0.99, -0.30, sh * 0.98, dep * 1.06],
+    [1.11, -0.25, sh * 1.00, dep * 0.98],
+    [1.19, -0.22, sh * 0.86, dep * 0.80],
+    [1.25, -0.21, nk, nk * 0.92],
+  ];
+  const prof = rig.build === 'heavy' ? 0.70 : rig.build === 'slim' ? 1.22 : 1;
+  const rings = stack.map((s, i) => ring(tilt * i * 0.5, s[0], s[1], s[2], s[3], n, prof));
+  loft(out, rings, (k) => (Math.cos((k / n) * TAU) > 0.55 ? belly : skin));
+  // deltoids: the shoulder line has to read as a shoulder, not a barrel edge
+  for (const sx of [-1, 1]) {
+    limb(out, [[sx * sh * 0.72, 1.14, -0.24], [sx * sh * 1.04, 1.09, -0.22]],
+      [sh * 0.34, sh * 0.30], skin, detail ? 8 : 5, 0.04);
+  }
+  // spine ridge for the species whose portraits wear one
+  if (rig.spine && detail) {
+    const sc = rig.spine;
+    for (let i = 0; i < 3; i++) {
+      const y = 1.14 - i * 0.11;
+      const h = 0.10 - i * 0.012;
+      const zb = -0.24 - dep * (0.82 + i * 0.06);
+      out.push({
+        col: sc, two: true, lift: -0.06,
+        pts: [[-0.055 + i * 0.004, y, zb], [0.055 - i * 0.004, y, zb], [0, y + h, zb - 0.05]],
+      });
+    }
+  }
+
+  // wings, for the species that fly: flat membranes swept up off the shoulder
+  // blades, high enough to clear the deck they are painted over.
+  if (rig.wing) {
+    const w = rig.wing;
+    const edge = 'rgba(20,14,34,0.55)';
+    for (const sx of [-1, 1]) {
+      out.push({
+        col: w, two: true, lift: -0.20, line: edge, lw: 1,
+        pts: [[sx * 0.14, 1.02, -0.34], [sx * 0.30, 1.38, -0.42], [sx * 0.52, 1.31, -0.48],
+          [sx * 0.44, 1.18, -0.46], [sx * 0.56, 1.12, -0.48], [sx * 0.30, 0.99, -0.42]],
+      });
+      out.push({
+        col: mix(w, '#000000', 0.22), two: true, lift: -0.24, line: edge, lw: 1,
+        pts: [[sx * 0.16, 1.03, -0.36], [sx * 0.30, 1.38, -0.42], [sx * 0.26, 1.02, -0.40]],
+      });
+    }
+  }
+
+  // arms: shoulder -> elbow -> wrist, then a paw closed round the rim
+  const W = o.wheel;
+  const wz = W.z;
+  const pairs = rig.arms === 4
+    ? [[1.10, sh * 1.04, 0.96, 0.058], [0.99, sh * 0.98, 0.88, 0.050]]
+    : [[1.10, sh * 1.04, 0.96, 0.062]];
+  for (const [sy, sx0, wy, r0] of pairs) {
+    for (const sx of [-1, 1]) {
+      // Both paws land on the rim of the wheel actually drawn: the grip x is
+      // the wheel's own centre plus its radius, not a fixed +-0.23, so a wheel
+      // shifted to stay under the rider never leaves one arm waving at air.
+      const gx = W.x + sx * W.r * 0.92;
+      const hy = W.y + sx * grip * 0.05;
+      const path = [
+        [sx * sx0, sy, -0.20],
+        [sx * (sx0 + 0.11), sy - 0.10, -0.04],
+        [(sx * (sx0 + 0.05) + gx) * 0.5, (sy - 0.20 + hy) * 0.5, wz - 0.16],
+        [gx, hy, wz - 0.02],
+      ];
+      limb(out, path, [r0, r0 * 0.86, r0 * 0.78, r0 * 0.72], skin, detail ? 8 : 5, 0.10);
+      const g0 = rig.hand === 'fist' ? 0.078 : rig.hand === 'fin' ? 0.058 : 0.068;
+      limb(out, [[gx, hy, wz - 0.03], [gx - sx * 0.02, hy + 0.02, wz + 0.05]],
+        [g0 * 0.9, g0], glove, detail ? 8 : 5, 0.22);
+      if (detail && rig.hand === 'claw') {
+        for (let i = -1; i <= 1; i++) {
+          const cx = gx - sx * 0.02 + i * 0.034;
+          limb(out, [[cx, hy + 0.02, wz + 0.03], [cx, hy + 0.055, wz + 0.08]], [0.016, 0.003], '#f2ead8', 4, 0.30);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------- arms
+ * The portraits have no arms, and a driver needs both hands on the wheel. The
+ * arms are the only invented part of a bespoke rider: swept limbs hung off the
+ * figure's own shoulder line (its widest torso op, so a Snorlax reaches from
+ * far out and a Gardevoir from close in), lit by the same key as the kart.
+ */
+
+/**
+ * @param {object} rig    species rig
+ * @param {object} o      { skin, glove, grip, detail, sx (shoulder x), sy (shoulder y) }
+ */
+function buildArms(rig, o) {
+  const out = [];
+  const { skin, glove, grip, detail } = o;
+  const n = detail ? 8 : 5;
+  const thick = rig.build === 'heavy' ? 0.072 : rig.build === 'slim' ? 0.050 : 0.060;
+  const pairs = rig.arms === 4
+    ? [[o.sx, o.sy, thick], [o.sx * 0.92, o.sy - 0.15, thick * 0.84]]
+    : [[o.sx, o.sy, thick]];
+  const W = o.wheel;
+  const WZ_HAND = W.z + 0.03;
+  for (const [ax, ay, r0] of pairs) {
+    for (const sx of [-1, 1]) {
+      // Grip point = the drawn rim, so both paws close on the wheel wherever
+      // the wheel had to move to stay centred under the driver.
+      const gx = W.x + sx * W.r * 0.90;
+      const hy = W.y + sx * grip * 0.05;
+      const path = [
+        [sx * ax, ay, -0.16],
+        [sx * (ax + 0.05), ay - 0.055, 0.04],
+        [(sx * (ax * 0.72 + 0.05) + gx) * 0.5, (ay + hy) * 0.5 - 0.02, 0.16],
+        [gx, hy, WZ_HAND - 0.03],
+      ];
+      limb(out, path, [r0, r0 * 0.90, r0 * 0.80, r0 * 0.74], skin, n, 0.10);
+      const g0 = rig.hand === 'fist' ? 0.082 : rig.hand === 'fin' ? 0.058 : 0.072;
+      limb(out, [[gx, hy, WZ_HAND - 0.03], [gx - sx * 0.016, hy + 0.028, WZ_HAND + 0.05]],
+        [g0 * 0.88, g0], glove, n, 0.24);
+      if (detail && (rig.hand === 'claw' || rig.hand === 'fin')) {
+        for (let i = -1; i <= 1; i++) {
+          const cx = gx - sx * 0.016 + i * 0.036;
+          limb(out, [[cx, hy + 0.03, WZ_HAND + 0.03], [cx, hy + 0.072, WZ_HAND + 0.08]],
+            [0.017, 0.003], '#f4ecdc', 4, 0.32);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Where the steering wheel lives, in kart-local units.
+ *
+ * It sits just in front of the chest rather than out on the nose, and its
+ * centre is slid along x by the parallax between its own plane and the torso's
+ * so that from the camera it always reads as centred on the driver: at a
+ * three-quarter yaw a wheel bolted to the chassis centreline projects a long
+ * way to one side, and only the near arm can reach it.
+ */
+export function wheelSpec(frame) {
+  const z = 0.18;
+  const t = Math.tan(frame.yaw || 0);
+  const x = Math.max(-0.22, Math.min(0.22, -(z - SEAT_Z) * t));
+  return { x, y: 0.845, z, r: 0.195 };
+}
+
+/** Steering wheel, drawn in the cockpit plane before the paws close on it. */
+function drawWheel(c, frame, trim, grip, W) {
+  if (!plane(c, frame, W.z)) return;
+  c.strokeStyle = '#20242c';
+  c.lineWidth = 0.060;
+  c.beginPath();
+  c.ellipse(W.x, W.y, W.r, W.r * 0.46, grip * 0.2, 0, Math.PI * 2);
+  c.stroke();
+  c.strokeStyle = mix(trim, '#ffffff', 0.3);
+  c.lineWidth = 0.026;
+  c.beginPath();
+  c.ellipse(W.x, W.y + 0.012, W.r, W.r * 0.46, grip * 0.2, Math.PI, Math.PI * 2);
+  c.stroke();
+  // hub + two spokes, so the rim reads as a wheel and not a stray dark arc
+  c.strokeStyle = '#20242c';
+  c.lineWidth = 0.034;
+  c.beginPath();
+  c.moveTo(W.x - W.r * 0.94, W.y + 0.01);
+  c.lineTo(W.x + W.r * 0.94, W.y + 0.01);
+  c.stroke();
+  c.fillStyle = mix(trim, '#101319', 0.35);
+  c.beginPath();
+  c.ellipse(W.x, W.y + 0.01, W.r * 0.24, W.r * 0.15, 0, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+}
+
+/* -------------------------------------------------------------- the figure
+ * The driver's whole body is the species' portrait, billboarded into the seat
+ * plane and cropped at the cockpit rim. Scale comes from the species' own face
+ * circle, so every rider's head lands at the same on-screen size as its HUD
+ * portrait next to it - while the body underneath keeps whatever that species
+ * actually is: Squirtle's shell rim, Charizard's wings, Garchomp's jaw,
+ * Snorlax's bulk, Meowth's charm.
+ */
+export const RIM_Y = 0.99;       // plane y of the cockpit rim (art y = ART_CUT)
+export const HEAD_UNIT = 0.315;  // plane radius the species' face circle maps to
+
+/** plane units per art unit for this rider. */
+function artScale(rig) {
+  return HEAD_UNIT / (rig.r || 23);
+}
+
+/** Seated species figure, billboarded into the seat plane. */
+function drawFigure(c, frame, racer, art, o) {
+  const u = artScale(art.rig);
+  const px = SPRITE_HALF * 2 * u * frame.unit(SEAT_Z);
+  const cv = riderSprite(racer, px);
+  if (!cv) return false;
+  if (!plane(c, frame, SEAT_Z)) return false;
+  const w = SPRITE_HALF * 2 * u;
+  const h = w * SPRITE_ASPECT;
+  c.translate(o.hx, RIM_Y);
+  c.rotate(-o.roll);
+  // billboard squash: the figure is a flat card, so it narrows as the kart yaws
+  c.scale(1 - Math.abs(o.turn) * 0.13, -1);
+  c.translate(o.turn * u * 2.6, 0);
+  try {
+    c.imageSmoothingEnabled = true;
+    c.drawImage(cv, -w / 2, -h, w, h);
+  } catch (e) { /* sprite not ready */ }
+  c.restore();
+  return true;
+}
+
 /**
  * Full driver, seated. `frame` is a kart3d frame, `grip` in -1..1 is the
  * steering input (leans the shoulders and turns the wheel).
@@ -367,8 +699,34 @@ export function drawDriver(c, frame, sp, racer, opts = {}) {
   const trim = opts.livery || racer.accent || '#444';
   const turn = clamp(Math.sin(frame.yaw) * 1.45 + grip * 0.2, -0.92, 0.92);
   const lean = grip * 0.07;
+  const fur = racer.color || sp.fur;
+  const W = wheelSpec(frame);
 
-  // ---- torso, in the seat plane ----------------------------------------
+  // ---- bespoke driver: shaded species body + portrait face ---------------
+  const art = riderArt(racer);
+  if (art.bespoke) {
+    const rig = art.rig;
+    const u = artScale(rig);
+    const skin = hexish(fur);
+    const glove = hexish(mix(trim, '#ffffff', 0.22));
+    // 1. the species itself, seated and cropped at the rim
+    const drawn = drawFigure(c, frame, racer, art, { turn, roll: lean * 0.6, hx: grip * 0.04 });
+    if (drawn) {
+      // 2. wheel, then 3. both arms closing on its rim - hung off the figure's
+      //    own shoulder line so the reach matches the body that owns it.
+      drawWheel(c, frame, trim, grip, W);
+      // shoulders on the jaw line of the figure's own face circle, so the arms
+      // leave the body under the cheeks instead of out of the ears
+      const sx = clamp(art.bw * u * 0.70, 0.26, 0.46);
+      const sy = RIM_Y + (ART_CUT - (rig.y + rig.r * 0.86)) * u;
+      const arms = buildArms(rig, { skin, glove, grip, detail, wheel: W, sx, sy: clamp(sy, 0.97, 1.16) });
+      if (detail) paint(c, frame, swell(arms, 1.10), { ambient: 0 });
+      paint(c, frame, arms, { ambient: opts.ambient || 0 });
+      return;
+    }
+  }
+
+  // ---- fallback (unknown roster id): parametric torso + head -------------
   if (plane(c, frame, SEAT_Z)) {
     c.translate(0, 0.62);
     c.rotate(-lean);
@@ -393,47 +751,11 @@ export function drawDriver(c, frame, sp, racer, opts = {}) {
   }
 
   // ---- steering wheel + arms -------------------------------------------
-  if (detail) {
-    const u = frame.unit(0.18);
-    if (plane(c, frame, 0.18)) {
-      c.strokeStyle = '#20242c';
-      c.lineWidth = 0.075;
-      c.beginPath();
-      c.ellipse(0, 0.98, 0.27, 0.13, grip * 0.2, 0, Math.PI * 2);
-      c.stroke();
-      c.strokeStyle = mix(trim, '#ffffff', 0.3);
-      c.lineWidth = 0.028;
-      c.beginPath();
-      c.ellipse(0, 0.99, 0.27, 0.13, grip * 0.2, Math.PI, Math.PI * 2);
-      c.stroke();
-      c.restore();
-    }
-    c.save();
-    c.strokeStyle = mix(sp.fur, '#000000', 0.16);
-    c.lineWidth = Math.max(1, u * 0.15);
-    c.lineCap = 'round';
-    for (const sx of [-1, 1]) {
-      const sh = frame.p(sx * 0.30, 1.10, SEAT_Z);
-      const gp = frame.p(sx * 0.25, 1.00 + sx * grip * 0.09, 0.18);
-      c.beginPath();
-      c.moveTo(sh.x, sh.y);
-      c.quadraticCurveTo((sh.x + gp.x) / 2 + sx * u * 0.09, (sh.y + gp.y) / 2, gp.x, gp.y);
-      c.stroke();
-    }
-    // gloves: the paws must not vanish into a same-coloured body
-    c.fillStyle = mix(trim, '#ffffff', 0.34);
-    c.strokeStyle = 'rgba(30,22,10,0.4)';
-    c.lineWidth = Math.max(0.6, u * 0.014);
-    for (const sx of [-1, 1]) {
-      const gp = frame.p(sx * 0.25, 1.00 + sx * grip * 0.09, 0.18);
-      c.beginPath();
-      c.ellipse(gp.x, gp.y, u * 0.10, u * 0.085, 0, 0, Math.PI * 2);
-      c.fill();
-      c.stroke();
-    }
-    c.lineCap = 'butt';
-    c.restore();
-  }
+  drawWheel(c, frame, trim, grip, W);
+  paint(c, frame, buildRider(rigOf(null), {
+    skin: hexish(fur), belly: hexish(mix(fur, '#ffffff', 0.4)),
+    glove: hexish(mix(trim, '#ffffff', 0.22)), grip, detail,
+  }), { ambient: opts.ambient || 0 });
 
   // ---- head -------------------------------------------------------------
   if (!plane(c, frame, HEAD_Z)) return;

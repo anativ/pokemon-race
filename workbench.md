@@ -23,4 +23,20 @@ stale confirm flags on back-nav. Flagged for future work: unify the three racer 
 (avatars / kart riders / podium figures) — the parametric kart-rider recipe collapses for
 complex species.
 
+## Polish gauntlet (run `wf_556ef69f-006`, finished 2026-08-17 · 25 agents · ~3.3M tokens)
+
+Four loops seeded with the first gauntlet's final gap verdicts:
+
+| Piece | Rounds | Verdict | Residual |
+|---|---|---|---|
+| kart-mesh | 3 | **WINS** | shell still boxier than the reference roadster |
+| podium-species | 2 | **WINS** | Charmander still snoutless |
+| rider-art | 3 | **WINS** | hero head bobblehead-large (~40% of kart width vs ~27% in ref) |
+| item-vfx | 4 | capped (minor) | beam cone lands on the correct victim (verifier confirmed) but crosses the rider and fires with no target |
+
+**Fresh-eyes verify:** full playthrough clean at 900p and 720p, zero console errors, determinism
+intact, state carries across all seams. Found + fixed: near rivals' mesh karts rendered
+X-ray-transparent in the fade-in band (`src/race/world.js`). Also noted: minimap chips still
+oversized, pickup-pop ring lands on the kart deck.
+
 Round-by-round history: [gauntlet/log.md](gauntlet/log.md). Evidence shots: `gauntlet/shots/` (untracked).

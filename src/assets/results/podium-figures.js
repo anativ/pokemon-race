@@ -101,14 +101,14 @@ const rr = (x, y, w, h, r, f, s = OUT, sw = 2.6) =>
  * the ribs) and whose wrist swells back out into the hand. The outline is one
  * continuous curve: deltoid bulge -> tapered forearm -> wrist -> hand root.
  */
-function limb(x1, y1, x2, y2, w, c, capR = 0, hand = null) {
+function limb(x1, y1, x2, y2, w, c, capR = 0, hand = null, bury = 1.9) {
   const r = (n) => Math.round(n * 100) / 100;
   const dx = x2 - x1; const dy = y2 - y1;
   const L = Math.hypot(dx, dy) || 1;
   const ux = dx / L; const uy = dy / L;
   const nx = -uy; const ny = ux;
   // Root the shoulder a full limb-width back into the body mass.
-  const sx = x1 - ux * w * 1.9; const sy = y1 - uy * w * 1.9;
+  const sx = x1 - ux * w * bury; const sy = y1 - uy * w * bury;
   const h0 = w * 0.9;    // inside the torso: wide, so the union is seamless
   const h1 = w * 0.74;   // deltoid
   const h2 = w * 0.5;    // elbow
@@ -165,6 +165,56 @@ function claw3(x, y, r, c, s = 1) {
     + ln(`M${q(x - R * 0.34)} ${q(y + R * 0.42)} q${q(R * 0.05)} ${q(-R * 0.6)} ${q(R * 0.02)} ${q(-R * 0.86)}`
       + ` M${q(x + R * 0.36)} ${q(y + R * 0.42)} q${q(-R * 0.04)} ${q(-R * 0.6)} ${q(-R * 0.02)} ${q(-R * 0.86)}`,
     OUT, 1.2)
+    + `<!--${s}-->`;
+}
+
+/** WYVERN HAND: a small narrow palm carrying three LONG hooked ivory talons.
+ *  Deliberately the opposite of `claw3` (fat paw, stubby talons) so a wyvern
+ *  and a fat dragon can never share a hand. */
+function wyvernHand(x, y, r, c, s = 1) {
+  const q = (n) => Math.round(n * 100) / 100;
+  const R = Math.max(r, 4.6);
+  const talon = (a, reach, drop) => p(
+    `M${q(x + a * R * 0.62)} ${q(y - R * 0.35)}`
+    + ` C${q(x + a * R * (0.62 + reach * 0.45))} ${q(y + drop * 0.45)}`
+    + ` ${q(x + a * R * (0.5 + reach))} ${q(y + drop * 0.88)}`
+    + ` ${q(x + a * R * (0.36 + reach))} ${q(y + drop)}`
+    + ` C${q(x + a * R * (0.16 + reach * 0.4))} ${q(y + drop * 0.66)}`
+    + ` ${q(x + a * R * 0.02)} ${q(y + R * 0.35)} ${q(x + a * R * 0.06)} ${q(y - R * 0.35)} Z`,
+    '#fff3d8', OUT, 1.6);
+  return talon(-1, 0.72, R * 1.85) + talon(0.06, 0.5, R * 2.25) + talon(1, 0.72, R * 1.85)
+    // narrow wedge palm, taller than it is wide
+    + p(`M${q(x - R * 0.86)} ${q(y - R * 0.7)}`
+      + ` C${q(x - R * 0.94)} ${q(y + R * 0.52)} ${q(x + R * 0.94)} ${q(y + R * 0.52)} ${q(x + R * 0.86)} ${q(y - R * 0.7)}`
+      + ` C${q(x + R * 0.48)} ${q(y - R * 1.28)} ${q(x - R * 0.48)} ${q(y - R * 1.28)} ${q(x - R * 0.86)} ${q(y - R * 0.7)} Z`,
+    c, OUT, 2.1)
+    + `<!--${s}-->`;
+}
+
+/** STOUT DRAGON MITT: a heavy rounded hand, taller than it is wide, whose
+ *  three SHORT BLUNT ivory claws barely clear the knuckle line. Deliberately
+ *  the opposite of `wyvernHand` (narrow palm, long spidery hooks) and thicker
+ *  through the wrist than `claw3`, so a big dragon's arm ends in a fist of
+ *  meat rather than a spider. */
+function stoutClaw(x, y, r, c, s = 1) {
+  const q = (n) => Math.round(n * 100) / 100;
+  const R = Math.max(r, 6);
+  // blunt nails, drawn UNDER the palm so only their round tips show
+  const nail = (a) => {
+    const bx = x + a * R * 0.52; const by = y + R * 0.46;
+    return p(`M${q(bx - R * 0.28)} ${q(by - R * 0.2)}`
+      + ` C${q(bx - R * 0.3)} ${q(by + R * 0.5)} ${q(bx + R * 0.3)} ${q(by + R * 0.5)} ${q(bx + R * 0.28)} ${q(by - R * 0.2)} Z`,
+    '#f7f2e4', OUT, 1.6);
+  };
+  return nail(-0.94) + nail(0) + nail(0.94)
+    // knuckle mass: a deep rounded block, wrist end flat so it welds to the arm
+    + p(`M${q(x - R * 0.98)} ${q(y - R * 0.72)}`
+      + ` C${q(x - R * 1.12)} ${q(y + R * 0.4)} ${q(x - R * 0.72)} ${q(y + R * 0.72)} ${q(x)} ${q(y + R * 0.72)}`
+      + ` C${q(x + R * 0.72)} ${q(y + R * 0.72)} ${q(x + R * 1.12)} ${q(y + R * 0.4)} ${q(x + R * 0.98)} ${q(y - R * 0.72)}`
+      + ` C${q(x + R * 0.6)} ${q(y - R * 1.24)} ${q(x - R * 0.6)} ${q(y - R * 1.24)} ${q(x - R * 0.98)} ${q(y - R * 0.72)} Z`,
+    c, OUT, 2.4)
+    + ln(`M${q(x - R * 0.4)} ${q(y + R * 0.5)} v${q(-R * 0.72)}`
+      + ` M${q(x + R * 0.4)} ${q(y + R * 0.5)} v${q(-R * 0.72)}`, OUT, 1.4)
     + `<!--${s}-->`;
 }
 
@@ -242,7 +292,8 @@ function paw(x, y, r, c) {
 
 /** DIGITIGRADE legs: thick thigh, back-bent hock, long clawed foot.
  *  Used by the raptor/jackal builds (Charizard, Lucario, Blaziken, Garchomp). */
-function digiLegs(c, { hip = 92, spread = 17, thigh = 17, shin = 8, foot = null, claw = null } = {}) {
+function digiLegs(c, { hip = 92, spread = 17, thigh = 17, shin = 9, foot = null, claw = null,
+  footW = 1, clawLen = 1 } = {}) {
   const fc = foot || c;
   const cc = claw || OUT;
   const one = (s) => {
@@ -254,13 +305,14 @@ function digiLegs(c, { hip = 92, spread = 17, thigh = 17, shin = 8, foot = null,
     return p(`M${x - thigh * 0.55 * s} ${hip - 8} q${thigh * 1.25 * s} -2 ${thigh * 1.05 * s} 12`
       + ` q${2 * s} 14 ${kx - x} ${ky - hip}`
       + ` q${-3 * s} 12 ${ax - kx} ${ay - ky}`
-      + ` l${-9 * s} 0 q${4 * s} -14 ${kx - x - 8 * s} ${ky - hip - 4}`
+      + ` l${-shin * s} 0 q${shin * 0.44 * s} -14 ${kx - x - shin * 0.89 * s} ${ky - hip - 4}`
       + ` q${-4 * s} -12 ${-thigh * 0.5 * s} ${-(ky - hip) - 6} Z`, c, OUT, 2.5)
       // long flat foot with three toe claws
-      + p(`M${ax - 8 * s} ${ay - 3} q${15 * s} -2 ${16 * s} 5 l${4 * s} ${7} `
-        + `q${-2 * s} 4 ${-10 * s} 4 l${-13 * s} 0 q${-5 * s} 0 ${-5 * s} -7 Z`, fc, OUT, 2.4)
-      + ln(`M${ax + 12 * s} ${FEET - 2} l${3 * s} 3 M${ax + 5 * s} ${FEET} l${2 * s} 3.6`
-        + ` M${ax - 2 * s} ${FEET} l${-1 * s} 3.6`, cc, 2.2);
+      + p(`M${ax - 8 * footW * s} ${ay - 3} q${15 * footW * s} -2 ${16 * footW * s} 5 l${4 * s} ${7} `
+        + `q${-2 * s} 4 ${-10 * footW * s} 4 l${-13 * footW * s} 0 q${-5 * s} 0 ${-5 * s} -7 Z`, fc, OUT, 2.4)
+      + ln(`M${ax + 12 * s} ${FEET - 2} l${3 * clawLen * s} ${3 * clawLen}`
+        + ` M${ax + 5 * s} ${FEET} l${2 * clawLen * s} ${3.6 * clawLen}`
+        + ` M${ax - 2 * s} ${FEET} l${-1 * clawLen * s} ${3.6 * clawLen}`, cc, 2.2 + (1 - clawLen) * 1.2);
   };
   return one(-1) + one(1);
 }
@@ -318,6 +370,11 @@ const smile = (x, y, w, sw = 2.4) => ln(`M${x - w} ${y} q${w} ${w * 0.85} ${w * 
 const closedEyes = (lx, rx, y, w = 5) =>
   ln(`M${lx - w} ${y} q${w} ${w * 0.9} ${w * 2} 0`, OUT, 2.6)
   + ln(`M${rx - w} ${y} q${w} ${w * 0.9} ${w * 2} 0`, OUT, 2.6);
+
+/** A SELF-LUMINOUS shape (tail flame, aura): drawn on the hull and highlight
+ *  passes but skipped by the shading pass, so a fire on the shadow side of the
+ *  figure still burns bright instead of going olive-grey. */
+const hot = (d, f) => (MODE === 'shade' ? '' : pf(d, f));
 
 /** Glossy highlight on a round body. */
 const gloss = (cx, cy, rx, ry) => ef(cx, cy, rx, ry, '#ffffff', 0.16);
@@ -377,15 +434,69 @@ function hornPair(cx, y, dx, len, sweep, c, inner) {
   return one(-1) + one(1);
 }
 
+/**
+ * BAT WING (the fix for "flat translucent panes on strut arms" = dragonfly).
+ * Built like an actual wing arm: a THICK tapered leading-edge spar
+ * (humerus -> elbow -> wrist), a wrist claw, three finger struts fanning back
+ * off the wrist, and a membrane stretched between them whose trailing edge is
+ * SCALLOPED (concave between finger tips) and anchored to the flank. Held
+ * high and swept BACK, so the whole lower flank stays open.
+ *
+ * @param {number} side  -1 = the figure's left wing, +1 = its right
+ * @param {object} c     palette (uses c.wing for bone, c.wingIn for membrane)
+ * @param {object} [g]   geometry override: {A,E,W,T:[t1,t2,t3],B}
+ */
+function batWing(side, c, g = {}) {
+  const q = (v) => Math.round(v * 100) / 100;
+  const X = (v) => 60 + side * (v - 60);   // mirror about the centre line
+  const P = (x, y) => `${q(X(x))} ${q(y)}`;
+  const A = g.A || [80, 58];               // shoulder root (kept just OUTSIDE
+  //                                          the torso: the shade/lite passes
+  //                                          replay hidden geometry, so a wing
+  //                                          buried in the chest ghosts through)
+  // The elbow is deliberately NOT on the line A->W: a straight leading edge
+  // reads as a boom arm carrying a pane (an insect), a bent one reads as a bat.
+  const E = g.E || [99, 33];               // elbow
+  const W = g.W || [123, -1];              // wrist (the high point)
+  const T = g.T || [[137, 16], [131, 42], [112, 65]];  // finger tips
+  const B = g.B || [93, 85];               // trailing anchor on the flank
+  const scallop = (f, t, k) => {
+    const mx = (f[0] + t[0]) / 2 + (W[0] - (f[0] + t[0]) / 2) * k;
+    const my = (f[1] + t[1]) / 2 + (W[1] - (f[1] + t[1]) / 2) * k;
+    return ` Q${P(mx, my)} ${P(t[0], t[1])}`;
+  };
+  const spar = (f, t, w0, w1, col, sw = 2.2) => {
+    const dx = t[0] - f[0]; const dy = t[1] - f[1];
+    const L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L; const ny = dx / L;
+    return p(`M${P(f[0] + nx * w0, f[1] + ny * w0)}`
+      + ` L${P(t[0] + nx * w1, t[1] + ny * w1)}`
+      + ` Q${P(t[0] + (t[0] - f[0]) / L * w1 * 1.4, t[1] + (t[1] - f[1]) / L * w1 * 1.4)}`
+      + ` ${P(t[0] - nx * w1, t[1] - ny * w1)}`
+      + ` L${P(f[0] - nx * w0, f[1] - ny * w0)} Z`, col, OUT, sw);
+  };
+  const membrane = `M${P(W[0], W[1])} L${P(T[0][0], T[0][1])}`
+    + scallop(T[0], T[1], 0.15) + scallop(T[1], T[2], 0.15) + scallop(T[2], B, 0.12)
+    // back up the flank to the shoulder, then out along the BENT leading edge
+    // (shoulder -> elbow -> wrist) so the membrane never bulges past the spar
+    + ` C${P(96, 78)} ${P(90, 66)} ${P(A[0], A[1])} L${P(E[0], E[1])} Z`;
+  return p(membrane, c.wingIn, OUT, 2.6)
+    + T.map((t) => spar(W, t, 4.1, 1.7, c.wing, 1.9)).join('')
+    + spar(A, E, 8.6, 6, c.wing, 2.4) + spar(E, W, 6, 4.2, c.wing, 2.4)
+    // wrist claw
+    + p(`M${P(W[0] - 1, W[1] + 4)} Q${P(W[0] + 3, W[1] - 3)} ${P(W[0] + 6, W[1] - 5)}`
+      + ` Q${P(W[0] + 4, W[1] + 1)} ${P(W[0] + 4, W[1] + 5)} Z`, '#f7f2e4', OUT, 1.6);
+}
+
 /** Rosy cheek blush, symmetric. */
 const blush = (cx, y, dx, r, col = '#ff9aa8') =>
   ef(cx - dx, y, r, r * 0.72, col, 0.75) + ef(cx + dx, y, r, r * 0.72, col, 0.75);
 
 export const KIT = {
   p, pf, e, ef, ln, rr, limb, digiLegs, pillarLegs, stubLegs, quadLegs,
-  paw, claw3, fist, webHand, padPaw, slimHand,
+  paw, claw3, wyvernHand, stoutClaw, fist, webHand, padPaw, slimHand,
   eyes, dotEyes, reptileEyes, smile, closedEyes, gloss, teeth,
-  snout, nostrils, grin, hornPair, blush,
+  snout, nostrils, grin, hornPair, blush, batWing,
 };
 
 /* ======================================================= species palettes
@@ -397,7 +508,9 @@ const SKIN = Object.freeze({
   dragonite: { color: '#f4a13c', accent: '#d0761c', belly: '#f9e8c4', wing: '#8fd9ad' },
   lucario: { color: '#3f7fd8', accent: '#171d2e', belly: '#f4d982', spike: '#cfdcee' },
   gengar: { color: '#9160dd', accent: '#4d2a86', belly: '#7a45c8' },
-  garchomp: { color: '#4b6fa8', accent: '#e8433c', belly: '#e8433c' },
+  // deliberately a DARK slate-indigo: the old mid-blue was a near match for
+  // Greninja's, so the two land-shark/ninja builds read as one family.
+  garchomp: { color: '#3a5580', accent: '#e8433c', belly: '#e8433c' },
   mewtwo: { color: '#e6dff0', accent: '#a488c8', belly: '#cfc0e4' },
   tyranitar: { color: '#6fa84e', accent: '#3c5c8c', belly: '#c9dcae' },
   machamp: { color: '#7fa8d8', accent: '#2b3a5c', belly: '#e9e2d2' },
@@ -429,51 +542,81 @@ function pal(racer) {
 const POSE = Object.create(null);
 
 /* -- CHARIZARD -----------------------------------------------------------
- * Plan: SMALL skull carried high on a visible neck, LONG snout drawn into the
- * skull path, two back-swept horns, huge bat wings arching above the head,
- * narrow chest -> wide hips, digitigrade raptor legs, thick tail with flame.
+ * Round 7 fix - "the orange dragonfly". The previous build hung flat
+ * straight-edged translucent panes off thin strut arms, wore two long
+ * whisker-antennae, and stood on toothpick limbs tipped with long spidery
+ * white points; the whole read was an insect, not a dragon. Now:
+ *   - WINGS come from `batWing()`: a thick tapered arm spar with a real elbow
+ *     bend along the leading edge, three finger struts fanning off the wrist,
+ *     a wrist claw, and a membrane with a SCALLOPED trailing edge, held high
+ *     and swept back.
+ *   - ONE stout occipital horn angled up and back off the skull (no pair).
+ *   - TRUNK limbs: heavy thighs/shins, thick arms, and `stoutClaw()` mitts
+ *     with three SHORT BLUNT claws (no ivory needles).
+ * Everything below still holds from the earlier "winged Dragonite recolor"
+ * fix: a LEAN, TALL WYVERN.
+ * Nothing about this build may echo Dragonite's: the torso is an athletic
+ * hourglass (deep chest, pinched waist) instead of a barrel, the belly plate
+ * is SMOOTH and narrow instead of a segmented cream ladder, the skull is
+ * small and carried high on a LONG EXPOSED NECK instead of sunk on the
+ * shoulders, the muzzle is a long tapering wedge instead of a blunt plate,
+ * the legs are digitigrade with orange raptor feet instead of cream
+ * pillar boots, and the tail sweeps clear of the hips so its flame burns as a
+ * SEPARATE torch in open air, well below the wingspan.
  */
 POSE.charizard = (c) => ''
-  // WINGS: rooted low on the shoulder blades and swept UP AND OUT, so their
-  // inner edge stays well clear of the skull (they used to cross the head and
-  // read as ears). Orange finger-bones, teal membrane - the reference read.
-  + p('M48 76 C32 60 14 36 -10 6 C-20 24 -17 54 -7 72 C6 58 22 54 34 60'
-    + ' C36 70 42 75 48 76 Z', c.wing)
-  + p('M72 76 C88 60 106 36 130 6 C140 24 137 54 127 72 C114 58 98 54 86 60'
-    + ' C84 70 78 75 72 76 Z', c.wing)
-  + pf('M47 72 C32 58 16 36 -5 12 C-13 28 -11 52 -5 65 C7 53 23 51 33 56 Z', c.wingIn)
-  + pf('M73 72 C88 58 104 36 125 12 C133 28 131 52 125 65 C113 53 97 51 87 56 Z', c.wingIn)
-  + ln('M47 74 L-8 7 M46 74 L-8 68 M46 74 L10 40 M73 74 L128 7 M74 74 L128 68 M74 74 L110 40',
-    c.accent, 2.4)
-  // TAIL: leaves the right hip, sweeps out and rears up; flame burns in clear
-  // air beside the hips, below the wingspan.
-  + p('M76 110 C100 116 122 108 126 92 C129 82 127 76 123 72 C124 84 118 94 107 98'
-    + ' C96 102 84 104 72 104 Z', c.color)
-  + pf('M121 78 C111 64 116 44 130 34 C127 52 139 56 140 44 C147 64 139 88 128 96'
-    + ' C123 91 122 84 121 78 Z', '#ffb020')
-  + pf('M123 77 C115 64 119 47 131 39 C128 54 137 56 138 46 C143 64 136 84 128 92'
-    + ' C124 87 123 82 123 77 Z', '#ffd93b')
-  + pf('M126 73 C122 63 125 52 132 46 C130 57 135 57 136 50 C140 63 135 76 129 82 Z', '#fff3ae')
-  + digiLegs(c.color, { hip: 96, spread: 21, thigh: 19, foot: c.belly })
-  // barrel chest -> heavy hips, drawn as ONE mass with the neck root
-  + p('M46 54 C36 68 31 88 37 102 C47 112 73 112 83 102 C89 88 84 68 74 54'
-    + ' C68 48 52 48 46 54 Z', c.color)
-  + pf('M50 64 C44 78 43 92 47 101 C56 108 64 108 73 101 C77 92 76 78 70 64'
-    + ' C64 59 56 59 50 64 Z', c.belly)
-  + ln('M49 80 h22 M50 90 h20 M52 99 h16', '#e2cb9a', 2.2)
-  // short arms, fused at the shoulder, ending in fat three-taloned paws
-  + limb(38, 64, 23, 82, 10.5, c.color, 9, claw3) + limb(82, 64, 97, 82, 10.5, c.color, 9, claw3)
-  // SKULL: a rounded reptile head, front on, with the brow ridge cut in
-  + p('M37 30 C37 14 47 6 60 6 C73 6 83 14 83 30 C83 42 77 50 68 53'
-    + ' C63 55 57 55 52 53 C43 50 37 42 37 30 Z', c.color)
-  // BACK-SWEPT HORNS: symmetric pair, rooted on the crown
-  + hornPair(60, 13, 15, 19, 15, c.color, c.accent)
-  // MUZZLE: centred on the midline, drawn into the skull, cream underside
-  + snout(60, 41, 11, 7.5, c.color, c.belly)
-  + nostrils(60, 37, 4, 1.6)
-  + grin(60, 44, 6.5)
-  + gloss(50, 20, 12, 7)
-  + reptileEyes(49, 71, 27, 5.6, 4.4);
+  // WINGS: real bat wings - a THICK tapered arm spar along the leading edge,
+  // three finger struts fanning off the wrist, a scalloped trailing edge, and
+  // a wrist claw. Held high and swept BACK so the right flank below y=60 stays
+  // open for the tail torch.
+  + batWing(-1, c) + batWing(1, c)
+  // TAIL: a long tapering whip off the right hip, held clear of the body so
+  // the flame reads as its own separate torch and not a smear on the wing.
+  + p('M68 94 C94 106 116 104 125 92 C128 90 131 91 131 94'
+    + ' C130 102 124 108 116 112 C100 119 80 116 64 106 Z', c.color)
+  + hot('M128 95 C114 82 118 58 130 46 C126 61 137 64 138 51 C142 71 138 89 129 99 Z', '#ff7a18')
+  + hot('M129 93 C119 81 122 62 131 51 C128 63 137 66 137 55 C140 73 136 87 129 96 Z', '#ffc22a')
+  + hot('M130 89 C123 79 126 65 132 57 C130 66 136 68 136 60 C139 74 135 84 131 91 Z', '#fff0a0')
+  // TRUNK raptor legs - heavy thighs and thick shins, ORANGE feet with short
+  // pale talons (Dragonite wears cream pillar boots; these are not toothpicks)
+  + digiLegs(c.color, {
+    hip: 92, spread: 17, thigh: 23, shin: 15, footW: 1.12, clawLen: 0.72,
+    foot: c.color, claw: '#fff0c2',
+  })
+  // LONG NECK: a genuinely EXPOSED column of daylight between the jaw and the
+  // shoulders - the single clearest way to read "wyvern", not "fat dragon".
+  + p('M53 36 C50 46 48 56 48 64 L72 64 C72 56 70 46 67 36 Z', c.color)
+  + pf('M56 44 C55 51 55 58 56 64 L64 64 C65 58 65 51 64 44 Z', c.belly)
+  // ATHLETIC HOURGLASS torso: deep chest, pinched waist, tight hips
+  + p('M46 58 C40 63 38 68 38 75 C38 82 44 87 46 94 C47 99 43 101 43 105'
+    + ' C43 109 50 111 60 111 C70 111 77 109 77 105 C77 101 73 99 74 94'
+    + ' C76 87 82 82 82 75 C82 68 80 63 74 58 C66 54 54 54 46 58 Z', c.color)
+  // SMOOTH narrow belly plate - deliberately no segment ladder
+  + pf('M49 63 C45 70 45 80 48 90 C50 97 46 100 47 105 C52 108 68 108 73 105'
+    + ' C74 100 70 97 72 90 C75 80 75 70 71 63 C64 60 56 60 49 63 Z', c.belly)
+  + ln('M60 65 C58 78 58 92 60 103', '#e6d2a6', 1.8)
+  // TRUNK arms: thick through the deltoid and forearm, ending in heavy mitts
+  // with short blunt claws (no spidery ivory needles)
+  // (a SHORT shoulder burial: the shade/lite passes replay hidden geometry,
+  // so a deeply buried root paints a ghost harness across the chest)
+  + limb(43, 66, 31, 91, 11.5, c.color, 8.4, stoutClaw, 0.55)
+  + limb(77, 66, 89, 91, 11.5, c.color, 8.4, stoutClaw, 0.55)
+  // ONE stout horn off the BACK of the skull - thick at the root, tapering to
+  // a blunt point, angled up and BACK. Drawn BEHIND the head so its root is
+  // buried in the skull mass (Charizard has a single occipital horn; the old
+  // symmetric pair read as insect antennae).
+  + p('M68 2 Q84 -7 96 -6 Q84 1 76 12 Q71 8 68 2 Z', c.color)
+  + pf('M74 1 Q84 -4 93 -5 Q84 0 78 8 Q76 4 74 1 Z', c.accent)
+  // HEAD: ONE tapering wedge - broad brow narrowing to a pointed snout. Drawn
+  // as a single path so no "muzzle plate" is ever bolted onto a round skull.
+  + p('M42 12 C42 -1 50 -7 60 -7 C70 -7 78 -1 78 12 C78 21 75 27 71 32'
+    + ' C69 38 66 43 60 43 C54 43 51 38 49 32 C45 27 42 21 42 12 Z', c.color)
+  + pf('M53 31 C54 38 56 43 60 43 C64 43 66 38 67 31 C64 35 56 35 53 31 Z', c.belly)
+  + ln('M50 29 C54 36 66 36 70 29', OUT, 2.2)
+  + teeth(60, 34, 6, 2)
+  + ef(58.1, 38.5, 1.1, 1.4, OUT) + ef(61.9, 38.5, 1.1, 1.4, OUT)
+  + gloss(52, 4, 8, 4.6)
+  + reptileEyes(51, 69, 16, 5.6, 4.2);
 
 /* -- DRAGONITE -----------------------------------------------------------
  * Plan: the opposite build to Charizard - a FAT round barrel that is almost
@@ -506,11 +649,21 @@ POSE.dragonite = (c) => ''
   // one blunt centred horn
   + p('M60 9 C58 2 58 -3 60 -8 C62 -3 62 2 62 9 Z', c.color)
   + p('M54 12 C56 3 58 -2 60 -8 C62 -1 63 4 65 12 Z', c.color)
-  + snout(60, 41, 12, 8, c.color, c.belly)
-  + nostrils(60, 37, 4.4, 1.6)
-  + grin(60, 44, 7)
-  + gloss(50, 21, 11, 6.4)
-  + eyes(50, 70, 29, 5.4, OUT);
+  // FACE (round 6 rebuild - the flat two-nostril PIG MUZZLE is gone):
+  // a short rounded snout bump that is NARROWER than the skull and sits high
+  // on it, a soft cream chin, hairline nostril slits instead of dark discs,
+  // and a wide friendly mouth whose corners run out past the snout.
+  + p('M51 32 C48 42 52 51 60 51 C68 51 72 42 69 32 C65 28 55 28 51 32 Z', c.color)
+  + pf('M53 43 C55 48 65 48 67 43 C64 46 56 46 53 43 Z', c.belly)
+  + ln('M56.6 36 q1.4 1.8 2.6 0 M60.8 36 q1.4 1.8 2.6 0', OUT, 1.5)
+  + ln('M45 40 C50 52 70 52 75 40', OUT, 2.8)
+  + ln('M60 51 v3', OUT, 1.6)
+  + gloss(50, 20, 11, 6)
+  // BIG kind oval eyes set close under a soft brow - Dragonite's whole read
+  + ef(50, 26, 5.6, 6.8, '#ffffff') + ef(70, 26, 5.6, 6.8, '#ffffff')
+  + ef(50.7, 27.2, 3.1, 4.4, OUT) + ef(70.7, 27.2, 3.1, 4.4, OUT)
+  + ef(48.4, 23.2, 1.9, 1.9, '#ffffff') + ef(68.4, 23.2, 1.9, 1.9, '#ffffff')
+  + blush(60, 36, 20, 4.6, '#f7b06a');
 
 /* -- LUCARIO -------------------------------------------------------------
  * Plan: lean athletic jackal - narrow waist, broad shoulders, LONG muzzle
@@ -963,9 +1116,10 @@ POSE.charmander = (c) => ''
   // big round head with a SHORT blunt muzzle drawn on the midline
   + p('M31 42 C31 24 44 14 60 14 C76 14 89 24 89 42 C89 56 79 66 60 66'
     + ' C41 66 31 56 31 42 Z', c.color)
-  + snout(60, 53, 12, 8, c.color, c.belly)
-  + nostrils(60, 49, 4, 1.5)
-  + grin(60, 56, 6)
+  // short rounded lizard muzzle - hairline nostril ticks, never dark discs
+  + snout(60, 53, 10, 7, c.color, c.belly)
+  + ln('M57.4 49.5 q1.1 1.5 2.1 0 M60.5 49.5 q1.1 1.5 2.1 0', OUT, 1.4)
+  + grin(60, 55, 6.5)
   + gloss(46, 30, 13, 7.5)
   + ef(48, 39, 5.8, 6.6, '#ffffff') + ef(72, 39, 5.8, 6.6, '#ffffff')
   + ef(48.8, 40, 2.9, 3.7, OUT) + ef(72.8, 40, 2.9, 3.7, OUT)

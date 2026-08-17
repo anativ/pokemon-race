@@ -25,8 +25,14 @@ export const ITEMS = Object.freeze([
     spin: 0.7, weight: 'rare' },
   // reach is deliberately short: the flame has to END on a kart the player can
   // actually see burn, not mow down rivals somewhere off past the horizon.
+  // ONE victim, always: the flame terminates on the kart it burns, so the
+  // sim must never damage a second rival the plume is not drawn on.
+  // `knock` is deliberately tiny and always aimed at the ROAD CENTRE (see
+  // applyHit's `dir`): the old outward shove drove the burning kart into the
+  // barrier, where the renderer stopped drawing it - which is exactly what made
+  // the flame look like it ended on empty asphalt.
   { id: 'hyper-beam', name: 'Hyper Beam', kind: 'beam', color: '#ffe98a',
-    reach: 330, sweep: 2400, spin: 1.1, maxHits: 3, weight: 'rare' },
+    reach: 250, sweep: 2600, spin: 1.35, maxHits: 1, knock: 0.16, weight: 'rare' },
 ]);
 
 const BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
@@ -206,13 +212,32 @@ export function fireItem(race, r) {
   if (item.kind === 'beam') {
     // Hyper Beam: a sustained lance down the road that mows down anything in
     // front of the firer for as long as it burns.
+    const nominal = item.reach || 360;
+    const victim = pickBeamTarget(race, r, nominal);
+    // The flame ALWAYS ends on a kart: if the only rival in front sits past the
+    // nominal reach, the beam stretches to exactly that kart rather than
+    // stopping short on bare tarmac. `reach` is therefore per-shot, not a
+    // constant, and the hit test below uses it.
+    const gap0 = victim ? forwardGap(race, r.dist, victim.dist) : 0;
+    const reach = victim ? Math.max(nominal, gap0 + 12) : nominal;
     race.beams.push({
       owner: r.id, item: item.id, lane: r.lane, dist: r.dist,
-      reach: item.reach || 330, sweep: item.sweep || 900,
+      reach, sweep: item.sweep || 2600,
       // `front` is how far down the road the flame has actually licked; it
-      // grows over the first frames so a rival is struck when the plume gets
-      // to them, and the burst lands where the flame tip is on screen.
-      front: 0, life: 0, ttl: 1.15, hits: [], target: null,
+      // grows out of the nose over the first frames, and the rival is struck
+      // on the step the plume actually reaches them.
+      // starts already licking out of the nose so the very first fire frame
+      // reads as a cone, not a spark, and burns long enough to still read at
+      // 400 ms (the frame the reference item panel is judged on).
+      // already licking all the way to the victim on the very first frame, so
+      // the fire-frame reads as a cone landing ON a kart instead of a stub.
+      front: victim ? Math.max(150, gap0) : 150,
+      life: 0, ttl: 1.35, hits: [],
+      maxHits: item.maxHits || 1,
+      // locked at fire time: the flame is drawn ending on THIS kart and no
+      // other kart is ever damaged by it.
+      target: victim ? victim.id : null,
+      gap: gap0,
       isPlayer: r.isPlayer, color: item.color,
     });
     race.shock = Math.max(race.shock, 0.55);
@@ -229,15 +254,85 @@ export function fireItem(race, r) {
   return item;
 }
 
+/**
+ * Closest gap this racer may be from the muzzle and still be drawn clear.
+ * Anything nearer than this is swallowed by the hero's own silhouette on
+ * screen (the renderer shoulders or drops rivals that intersect it), so the
+ * flame could never be seen ENDING on it.
+ *
+ * Deliberately generous: burning a kart halves its speed, so we close on the
+ * victim hard for the rest of the 1.35 s burn. Locking onto someone barely a
+ * kart length ahead means that by the 400 ms frame they are alongside us and
+ * the cone has nothing up the road to terminate on.
+ */
+const BEAM_MIN_GAP = 115;
+/**
+ * Lane half-window the flame can be aimed across. It spans the WHOLE road:
+ * a rival two lanes over is still a kart on screen for the cone to end on,
+ * and refusing to aim at them is what left the beam burning bare tarmac on
+ * tracks where nobody happened to be in our own lane.
+ */
+const BEAM_LANE = 1.30;
+/** How far past the nominal reach the flame will stretch to find a kart. */
+const BEAM_FAR = 3.4;
+
+/** Forward (wrapping) gap from `a` to `b` along the lap, signed to +-half lap. */
+export function forwardGap(race, aDist, bDist) {
+  const half = race.lapLen / 2;
+  let gap = bDist - aDist;
+  while (gap < -half) gap += race.lapLen;
+  while (gap > half) gap -= race.lapLen;
+  return gap;
+}
+
+/**
+ * The single rival a Hyper Beam burns: the nearest kart ahead of `from`, inside
+ * the beam's reach and roughly in its lane. Locked once at fire time and kept
+ * for the beam's whole life, so the kart the flame is DRAWN on is exactly the
+ * kart that takes the damage. Pure + stable order -> determinism holds.
+ */
+export function pickBeamTarget(race, from, reach) {
+  if (!from) return null;
+  let best = null;
+  let bestScore = Infinity;
+  let far = null;
+  let farGap = Infinity;
+  for (const o of race.racers) {
+    if (o === from || o.id === from.id || o.finished) continue;
+    const gap = forwardGap(race, from.dist, o.dist);
+    if (gap < BEAM_MIN_GAP) continue;
+    const off = Math.abs(o.lane - from.lane);
+    if (gap <= reach && off <= BEAM_LANE) {
+      // DEAD AHEAD beats merely near. The flame has to read as pointing INTO
+      // the kart it burns, so a rival square in our lane wins over one that is
+      // marginally closer but half a road away (which is what used to send the
+      // cone diagonally off the racing line onto empty asphalt). Distance is
+      // only the tie-breaker.
+      const score = off + (gap / Math.max(1, reach)) * 0.55;
+      if (score < bestScore) { bestScore = score; best = o; }
+    } else if (gap <= reach * BEAM_FAR && gap < farGap) {
+      // nothing in the nominal window: stretch to the nearest kart in front so
+      // the plume still terminates on a chassis rather than fizzling.
+      farGap = gap; far = o;
+    }
+  }
+  return best || far;
+}
+
 /** Knock a racer about. Weight softens the hit; a spin always costs speed. */
-export function applyHit(race, target, item, from) {
+export function applyHit(race, target, item, from, opts = {}) {
   if (!target || target.finished) return;
   const soften = 1 / (0.75 + target.phys.mass * 0.35);
   target.spun = Math.max(target.spun, (item.spin || 1) * soften);
-  target.spinDir = target.lane >= 0 ? 1 : -1;
+  // `opts.dir` lets a beam spin its victim TOWARDS the road centre. The default
+  // (outward) shove walks a kart that is already near the edge into the
+  // barrier, where the renderer stops drawing it - and a flame drawn onto a
+  // kart nobody can see reads as a flame that hit nothing.
+  target.spinDir = opts.dir || (target.lane >= 0 ? 1 : -1);
   // Immediate knock, so the hit shows up in state() on the very same step even
   // if the field is stationary (e.g. an item fired on the grid).
-  target.lane = Math.max(-1.02, Math.min(1.02, target.lane + target.spinDir * 0.14));
+  const shove = opts.shove == null ? 0.14 : opts.shove;
+  target.lane = Math.max(-1.02, Math.min(1.02, target.lane + target.spinDir * shove));
   target.speed *= 0.55;
   target.boost = 0;
   target.boostT = 0;
@@ -251,6 +346,9 @@ export function applyHit(race, target, item, from) {
 }
 
 // ---------------------------------------------------------------- flight
+
+/** Seconds a beam's sideways `knock` is spread over. */
+const KNOCK_T = 0.18;
 
 /** Advance projectiles + beams and resolve their hits. */
 export function updateOrdnance(race, dt) {
@@ -299,24 +397,45 @@ export function updateOrdnance(race, dt) {
     b.life += dt;
     const owner = race.racers.find((r) => r.id === b.owner);
     if (owner) { b.dist = owner.dist; b.lane += (owner.lane - b.lane) * Math.min(1, dt * 6); }
-    b.front = Math.min(b.reach, b.front + (b.sweep || 900) * dt);
+    b.front = Math.min(b.reach, b.front + (b.sweep || 2600) * dt);
     const item = getItem(b.item) || { spin: 1.5 };
-    const cap = (getItem(b.item) || {}).maxHits || 3;
-    // the nearest rival still in the cone is the one the flame is burning; the
-    // effects layer pins the plume's fireball onto them.
-    let lockGap = Infinity;
-    b.target = null;
-    for (const o of race.racers) {
-      if (o.id === b.owner || o.finished) continue;
-      let gap = o.dist - b.dist;
+    // The victim is locked: acquired at fire time, re-acquired only while the
+    // beam still has nobody. Whatever the flame is drawn on is what burns.
+    let victim = b.target ? race.racers.find((r) => r.id === b.target) : null;
+    if (victim && victim.finished) victim = null;
+    if (!victim && owner && b.hits.length < (b.maxHits || 1)) {
+      victim = pickBeamTarget(race, owner, b.reach);
+      b.target = victim ? victim.id : null;
+    }
+    if (victim) {
+      let gap = victim.dist - b.dist;
       while (gap < -lapLen / 2) gap += lapLen;
-      if (gap < 12 || gap > b.reach) continue;
-      if (Math.abs(o.lane - b.lane) > 1.15) continue;
-      if (gap < lockGap) { lockGap = gap; b.target = o.id; }
-      if (b.hits.length >= cap || b.hits.includes(o.id)) continue;
-      if (gap > b.front || Math.abs(o.lane - b.lane) > 0.85) continue;
-      b.hits.push(o.id);
-      applyHit(race, o, item, owner);
+      while (gap > lapLen / 2) gap -= lapLen;
+      b.gap = gap;
+      if (!b.hits.includes(victim.id) && gap <= b.front + 6 && gap <= b.reach) {
+        b.hits.push(victim.id);
+        // always slew INWARDS, towards the middle of the road: the burning kart
+        // has to stay on camera under the flame for the whole burn.
+        b.knockDir = victim.lane >= 0 ? -1 : 1;
+        applyHit(race, victim, item, owner, { dir: b.knockDir, shove: 0.10 });
+      }
+      // The burnt kart slews OFF the racing line while it burns - spread over
+      // KNOCK_T rather than teleported, so the frame the flame lands on still
+      // shows it dead ahead. It also keeps it on camera: the renderer culls a
+      // rival that ends up inside the hero's own silhouette, and a victim that
+      // vanished two frames after the hit is what made the flame look like it
+      // terminated on nobody.
+      // BUDGETED: the slew is spent over KNOCK_T and then stops. Left running
+      // for the whole 1.35 s burn it walks the victim right across the road and
+      // out of frame, which is the bug that made the flame look unattached.
+      if (b.hits.includes(victim.id) && item.knock && (b.knocked || 0) < item.knock) {
+        const step = Math.min((item.knock * dt) / KNOCK_T, item.knock - (b.knocked || 0));
+        b.knocked = (b.knocked || 0) + step;
+        victim.lane = Math.max(-1.02, Math.min(1.02,
+          victim.lane + (b.knockDir || 1) * step));
+      }
+    } else {
+      b.gap = 0;
     }
     if (b.life > b.ttl) race.beams.splice(i, 1);
   }

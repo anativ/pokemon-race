@@ -1,0 +1,12 @@
+import { serveRepo } from '../tools/screenshot.mjs';
+import { chromium } from 'playwright';
+const { origin: url, close } = await serveRepo();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+await page.goto(`${url}/index.html?screen=race&track=pallet-town&racer=pikachu`);
+await page.waitForFunction(() => window.__pkr && window.__pkr.isReady === true);
+await page.evaluate(() => { window.__fxgrid = 1; });
+await page.evaluate(() => window.__pkr.step(6000));
+await page.waitForTimeout(250);
+await page.screenshot({ path: 'gauntlet/shots/iv2-grid.png', clip: { x: 420, y: 320, width: 900, height: 580 } });
+await browser.close(); await close();

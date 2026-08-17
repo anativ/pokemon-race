@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+import { createHash } from 'node:crypto';
+import { serveRepo } from '../../tools/screenshot.mjs';
+const { origin, close } = await serveRepo();
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 900, height: 560 } });
+const errs = []; p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+p.on('pageerror', (e) => errs.push(String(e)));
+await p.goto(`${origin}/index.html?screen=results&racer=charizard&pos=2&seed=17`, { waitUntil: 'load' });
+await p.waitForFunction(() => window.__pkr && window.__pkr.isReady);
+await p.waitForTimeout(600);
+const a = await p.screenshot({ path: 'gauntlet/shots/podium-species-p2r2-anim-a.png' });
+await p.waitForTimeout(1000);
+const c = await p.screenshot({ path: 'gauntlet/shots/podium-species-p2r2-anim-b.png' });
+const h = (x) => createHash('md5').update(x).digest('hex').slice(0, 10);
+console.log('a', h(a), 'b', h(c), 'differ', h(a) !== h(c), 'errs', errs.length, errs[0] || '');
+await b.close(); await close();
